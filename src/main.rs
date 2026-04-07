@@ -4,7 +4,6 @@ use pnet::datalink::Channel::Ethernet;
 use pnet::datalink::{self, NetworkInterface};
 use pnet::packet::Packet;
 use pnet::packet::ethernet::EthernetPacket;
-use pnet::packet::ipv4::Ipv4Packet;
 
 use std::cmp::min;
 use std::env;
@@ -36,102 +35,96 @@ fn main() {
         match rx.next() {
             Ok(packet) => {
                 let packet = EthernetPacket::new(packet).unwrap();
-
-                if let Some(_why_make_our_life_easier_when_practicing) =
-                    Ipv4Packet::new(packet.payload())
-                {
-                    let payload = packet.payload();
-                    let version_and_ihl = format!("{:x}", payload[0]);
-                    let version = match &version_and_ihl.chars().nth(0) {
-                        Some(c) => c.to_digit(10).unwrap(),
-                        None => continue,
-                    };
-                    let ihl = 4 * match &version_and_ihl.chars().nth(1) {
-                        Some(c) => c.to_digit(10).unwrap(),
-                        None => continue,
-                    };
-                    if ihl != 20 {
-                        println!(
-                            "Received IPv{}: but IHL is {}, can only handle 20",
-                            version, ihl,
-                        );
-                        continue;
-                    }
-
-                    //// IPv4 header
-                    // low delay, high throughput, reliability
-                    let _tos = payload[1];
-                    let _total_length = payload[3]; // payload 2 is part of but not sure what factor
-                    // identification: unique packet id (16 bits)
-                    // flags: 3 flags, 1 bit each, reserved bit (must be 0), do not fragment flag, more fragments flag
-                    let _fragment = &payload[4..6];
-                    // represents number of data bytes ahead of the particular fragment in the particular datagram
-                    let _fragment_offset = &payload[6..8];
-                    // restruct number of hops taken by packet before delivering to the destination
-                    let _ttl = payload[8];
-                    // name of protocol: tcp, udp
-                    let protocol = match payload[9] {
-                        //https://en.wikipedia.org/wiki/List_of_IP_protocol_numbers
-                        6 => "TCP",
-                        _ => "UNKOWN",
-                    };
-                    // 16 bit checksum for checking errors in datagram header
-                    let _header_checksum = &payload[10..12];
-                    // 32 bits ip address of sender
-                    let source_ip = join_nums(&payload[12..16], ".");
-                    // 32 bits ip address of receiver
-                    let destination_ip = join_nums(&payload[16..20], ".");
-
-                    //// tcp header
-                    let source_port = convert_binary_to_decimal(&payload[20..22]);
-                    let destination_port = convert_binary_to_decimal(&payload[22..24]);
-                    let _sequence_number = convert_binary_to_decimal(&payload[24..28]);
-                    let _acknowledgement_number = convert_binary_to_decimal(&payload[28..32]);
-                    let data_offset_and_reserved = format!("{:x}", payload[32]);
-                    let tcp_header_size = match data_offset_and_reserved.chars().nth(0) {
-                        Some(i) => i.to_digit(10).unwrap() * 4,
-                        None => 32, // bc why not
-                    };
-                    let flag = handle_tcp_flag(&payload[33]);
-                    let _window_size = convert_binary_to_decimal(&payload[34..36]);
-                    let _check_sum = convert_binary_to_decimal(&payload[36..38]);
-                    let _urgent_pointer = convert_binary_to_decimal(&payload[38..40]);
-                    // skipping tcp options
-
-                    let mut content_start: usize = ihl as usize + tcp_header_size as usize;
-                    let mut content_end: usize = payload.len();
-                    let mut header_footer = "";
-                    // assuming it's plain text postgres protocol
-                    if content_start == content_end {
-                        content_start -= 1;
-                        content_end -= 1;
-                    } else if payload[content_start] == 80 || payload[content_start] == 81 {
-                        header_footer = "\n>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>\n";
-
-                        let total_content_length = convert_binary_to_decimal(
-                            &payload[content_start + 1..content_start + 5],
-                        );
-
-                        content_start = min(content_start + 5, payload.len() - 1);
-                        content_end = min(content_start + total_content_length, payload.len() - 1);
-                    }
-                    let content = &payload[content_start..content_end]
-                        .iter()
-                        .map(|c| *c as char)
-                        .collect::<String>();
-
+                let payload = packet.payload();
+                let version_and_ihl = format!("{:x}", payload[0]);
+                let version = match &version_and_ihl.chars().nth(0) {
+                    Some(c) => c.to_digit(10).unwrap(),
+                    None => continue,
+                };
+                let ihl = 4 * match &version_and_ihl.chars().nth(1) {
+                    Some(c) => c.to_digit(10).unwrap(),
+                    None => continue,
+                };
+                if ihl != 20 {
                     println!(
-                        "{header_footer}IPv{}: {}:{} -> {}:{} {} using {}, content: {:?}{header_footer}",
-                        version,
-                        source_ip,
-                        source_port,
-                        destination_ip,
-                        destination_port,
-                        flag,
-                        protocol,
-                        content,
+                        "Received IPv{}: but IHL is {}, can only handle 20",
+                        version, ihl,
                     );
+                    continue;
                 }
+
+                //// IPv4 header
+                // low delay, high throughput, reliability
+                let _tos = payload[1];
+                let _total_length = payload[3]; // payload 2 is part of but not sure what factor
+                // identification: unique packet id (16 bits)
+                // flags: 3 flags, 1 bit each, reserved bit (must be 0), do not fragment flag, more fragments flag
+                let _fragment = &payload[4..6];
+                // represents number of data bytes ahead of the particular fragment in the particular datagram
+                let _fragment_offset = &payload[6..8];
+                // restruct number of hops taken by packet before delivering to the destination
+                let _ttl = payload[8];
+                // name of protocol: tcp, udp
+                let protocol = match payload[9] {
+                    //https://en.wikipedia.org/wiki/List_of_IP_protocol_numbers
+                    6 => "TCP",
+                    _ => "UNKOWN",
+                };
+                // 16 bit checksum for checking errors in datagram header
+                let _header_checksum = &payload[10..12];
+                // 32 bits ip address of sender
+                let source_ip = join_nums(&payload[12..16], ".");
+                // 32 bits ip address of receiver
+                let destination_ip = join_nums(&payload[16..20], ".");
+
+                //// tcp header
+                let source_port = convert_binary_to_decimal(&payload[20..22]);
+                let destination_port = convert_binary_to_decimal(&payload[22..24]);
+                let _sequence_number = convert_binary_to_decimal(&payload[24..28]);
+                let _acknowledgement_number = convert_binary_to_decimal(&payload[28..32]);
+                let data_offset_and_reserved = format!("{:x}", payload[32]);
+                let tcp_header_size = match data_offset_and_reserved.chars().nth(0) {
+                    Some(i) => i.to_digit(10).unwrap() * 4,
+                    None => 32, // bc why not
+                };
+                let flag = handle_tcp_flag(&payload[33]);
+                let _window_size = convert_binary_to_decimal(&payload[34..36]);
+                let _check_sum = convert_binary_to_decimal(&payload[36..38]);
+                let _urgent_pointer = convert_binary_to_decimal(&payload[38..40]);
+                // skipping tcp options
+
+                let mut content_start: usize = ihl as usize + tcp_header_size as usize;
+                let mut content_end: usize = payload.len();
+                let mut header_footer = "";
+                // assuming it's plain text postgres protocol
+                if content_start == content_end {
+                    content_start -= 1;
+                    content_end -= 1;
+                } else if payload[content_start] == 80 || payload[content_start] == 81 {
+                    header_footer = "\n>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>\n";
+
+                    let total_content_length =
+                        convert_binary_to_decimal(&payload[content_start + 1..content_start + 5]);
+
+                    content_start = min(content_start + 5, payload.len() - 1);
+                    content_end = min(content_start + total_content_length, payload.len() - 1);
+                }
+                let content = &payload[content_start..content_end]
+                    .iter()
+                    .map(|c| *c as char)
+                    .collect::<String>();
+
+                println!(
+                    "{header_footer}IPv{}: {}:{} -> {}:{} {} using {}, content: {:?}{header_footer}",
+                    version,
+                    source_ip,
+                    source_port,
+                    destination_ip,
+                    destination_port,
+                    flag,
+                    protocol,
+                    content,
+                );
             }
             Err(e) => {
                 // If an error occurs, we can handle it here
