@@ -2,9 +2,9 @@ extern crate pnet;
 
 use pnet::datalink::Channel::Ethernet;
 use pnet::datalink::{self, NetworkInterface};
-use pnet::packet::ethernet::{EthernetPacket, MutableEthernetPacket};
+use pnet::packet::Packet;
+use pnet::packet::ethernet::EthernetPacket;
 use pnet::packet::ipv4::Ipv4Packet;
-use pnet::packet::{MutablePacket, Packet};
 
 use std::cmp::min;
 use std::env;
@@ -23,8 +23,8 @@ fn main() {
         .unwrap();
 
     // Create a new channel, dealing with layer 2 packets
-    let (mut tx, mut rx) = match datalink::channel(&interface, Default::default()) {
-        Ok(Ethernet(tx, rx)) => (tx, rx),
+    let mut rx = match datalink::channel(&interface, Default::default()) {
+        Ok(Ethernet(_, rx)) => rx,
         Ok(_) => panic!("Unhandled channel type"),
         Err(e) => panic!(
             "An error occurred when creating the datalink channel: {}",
@@ -60,15 +60,15 @@ fn main() {
 
                     //// IPv4 header
                     // low delay, high throughput, reliability
-                    let tos = payload[1];
-                    let total_length = payload[3]; // payload 2 is part of but not sure what factor
+                    let _tos = payload[1];
+                    let _total_length = payload[3]; // payload 2 is part of but not sure what factor
                     // identification: unique packet id (16 bits)
                     // flags: 3 flags, 1 bit each, reserved bit (must be 0), do not fragment flag, more fragments flag
-                    let fragment = &payload[4..6];
+                    let _fragment = &payload[4..6];
                     // represents number of data bytes ahead of the particular fragment in the particular datagram
-                    let fragment_offset = &payload[6..8];
+                    let _fragment_offset = &payload[6..8];
                     // restruct number of hops taken by packet before delivering to the destination
-                    let ttl = payload[8];
+                    let _ttl = payload[8];
                     // name of protocol: tcp, udp
                     let protocol = match payload[9] {
                         //https://en.wikipedia.org/wiki/List_of_IP_protocol_numbers
@@ -76,7 +76,7 @@ fn main() {
                         _ => "UNKOWN",
                     };
                     // 16 bit checksum for checking errors in datagram header
-                    let header_checksum = &payload[10..12];
+                    let _header_checksum = &payload[10..12];
                     // 32 bits ip address of sender
                     let source_ip = join_nums(&payload[12..16], ".");
                     // 32 bits ip address of receiver
@@ -85,17 +85,17 @@ fn main() {
                     //// tcp header
                     let source_port = convert_binary_to_decimal(&payload[20..22]);
                     let destination_port = convert_binary_to_decimal(&payload[22..24]);
-                    let sequence_number = convert_binary_to_decimal(&payload[24..28]);
-                    let acknowledgement_number = convert_binary_to_decimal(&payload[28..32]);
+                    let _sequence_number = convert_binary_to_decimal(&payload[24..28]);
+                    let _acknowledgement_number = convert_binary_to_decimal(&payload[28..32]);
                     let data_offset_and_reserved = format!("{:x}", payload[32]);
                     let tcp_header_size = match data_offset_and_reserved.chars().nth(0) {
                         Some(i) => i.to_digit(10).unwrap() * 4,
                         None => 32, // bc why not
                     };
                     let flag = handle_tcp_flag(&payload[33]);
-                    let window_size = convert_binary_to_decimal(&payload[34..36]);
-                    let check_sum = convert_binary_to_decimal(&payload[36..38]);
-                    let urgent_pointer = convert_binary_to_decimal(&payload[38..40]);
+                    let _window_size = convert_binary_to_decimal(&payload[34..36]);
+                    let _check_sum = convert_binary_to_decimal(&payload[36..38]);
+                    let _urgent_pointer = convert_binary_to_decimal(&payload[38..40]);
                     // skipping tcp options
 
                     let mut content_start: usize = ihl as usize + tcp_header_size as usize;

@@ -17,7 +17,7 @@ Get the interface name (should look like "docker0")
 ip address
 ```
 
-Run the app, passing in interface name
+Run the app, passing in interface name (requires running with sudo0)
 ```bash
 cargo run -- docker0
 ```
