@@ -1,5 +1,7 @@
 extern crate pnet;
 
+mod transport_layer_protocol;
+
 use pnet::datalink::Channel::Ethernet;
 use pnet::datalink::{self, NetworkInterface};
 use pnet::packet::Packet;
@@ -7,6 +9,8 @@ use pnet::packet::ethernet::EthernetPacket;
 
 use std::cmp::min;
 use std::env;
+
+use crate::transport_layer_protocol::TransportLayerProtocol;
 
 // Invoke as echo <interface name>
 fn main() {
@@ -67,8 +71,9 @@ fn main() {
                 // name of protocol: tcp, udp
                 let protocol = match payload[9] {
                     //https://en.wikipedia.org/wiki/List_of_IP_protocol_numbers
-                    6 => "TCP",
-                    _ => "UNKOWN",
+                    6 => TransportLayerProtocol::TCP,
+                    17 => TransportLayerProtocol::UDP,
+                    _ => TransportLayerProtocol::Unknown,
                 };
                 // 16 bit checksum for checking errors in datagram header
                 let _header_checksum = &payload[10..12];
@@ -77,54 +82,76 @@ fn main() {
                 // 32 bits ip address of receiver
                 let destination_ip = join_nums(&payload[16..20], ".");
 
-                //// tcp header
-                let source_port = convert_binary_to_decimal(&payload[20..22]);
-                let destination_port = convert_binary_to_decimal(&payload[22..24]);
-                let _sequence_number = convert_binary_to_decimal(&payload[24..28]);
-                let _acknowledgement_number = convert_binary_to_decimal(&payload[28..32]);
-                let data_offset_and_reserved = format!("{:x}", payload[32]);
-                let tcp_header_size = match data_offset_and_reserved.chars().nth(0) {
-                    Some(i) => i.to_digit(10).unwrap() * 4,
-                    None => 32, // bc why not
-                };
-                let flag = handle_tcp_flag(&payload[33]);
-                let _window_size = convert_binary_to_decimal(&payload[34..36]);
-                let _check_sum = convert_binary_to_decimal(&payload[36..38]);
-                let _urgent_pointer = convert_binary_to_decimal(&payload[38..40]);
-                // skipping tcp options
+                if protocol == TransportLayerProtocol::TCP {
+                    //// tcp header
+                    let source_port = convert_binary_to_decimal(&payload[20..22]);
+                    let destination_port = convert_binary_to_decimal(&payload[22..24]);
+                    let _sequence_number = convert_binary_to_decimal(&payload[24..28]);
+                    let _acknowledgement_number = convert_binary_to_decimal(&payload[28..32]);
+                    let data_offset_and_reserved = format!("{:x}", payload[32]);
+                    let tcp_header_size = match data_offset_and_reserved.chars().nth(0) {
+                        Some(i) => i.to_digit(10).unwrap() * 4,
+                        None => 32, // bc why not
+                    };
+                    let flag = handle_tcp_flag(&payload[33]);
+                    let _window_size = convert_binary_to_decimal(&payload[34..36]);
+                    let _check_sum = convert_binary_to_decimal(&payload[36..38]);
+                    let _urgent_pointer = convert_binary_to_decimal(&payload[38..40]);
+                    // skipping tcp options
 
-                let mut content_start: usize = ihl as usize + tcp_header_size as usize;
-                let mut content_end: usize = payload.len();
-                let mut header_footer = "";
-                // assuming it's plain text postgres protocol
-                if content_start == content_end {
-                    content_start -= 1;
-                    content_end -= 1;
-                } else if payload[content_start] == 80 || payload[content_start] == 81 {
-                    header_footer = "\n>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>\n";
+                    let mut content_start: usize = ihl as usize + tcp_header_size as usize;
+                    let mut content_end: usize = payload.len();
+                    let mut header_footer = "";
+                    // assuming it's plain text postgres protocol
+                    if content_start == content_end {
+                        content_start -= 1;
+                        content_end -= 1;
+                    } else if payload[content_start] == 80 || payload[content_start] == 81 {
+                        header_footer = "\n>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>\n";
 
-                    let total_content_length =
-                        convert_binary_to_decimal(&payload[content_start + 1..content_start + 5]);
+                        let total_content_length = convert_binary_to_decimal(
+                            &payload[content_start + 1..content_start + 5],
+                        );
 
-                    content_start = min(content_start + 5, payload.len() - 1);
-                    content_end = min(content_start + total_content_length, payload.len() - 1);
+                        content_start = min(content_start + 5, payload.len() - 1);
+                        content_end = min(content_start + total_content_length, payload.len() - 1);
+                    }
+                    let content = &payload[content_start..content_end]
+                        .iter()
+                        .map(|c| *c as char)
+                        .collect::<String>();
+
+                    println!(
+                        "{header_footer}IPv{}: {}:{} -> {}:{} {} using {}, content: {:?}{header_footer}",
+                        version,
+                        source_ip,
+                        source_port,
+                        destination_ip,
+                        destination_port,
+                        flag,
+                        protocol,
+                        content,
+                    );
+                } else if protocol == TransportLayerProtocol::UDP {
+                    //// udp header
+                    let source_port = convert_binary_to_decimal(&payload[20..22]);
+                    let destination_port = convert_binary_to_decimal(&payload[22..24]);
+                    let _length = convert_binary_to_decimal(&payload[24..26]);
+                    let _check_sum = convert_binary_to_decimal(&payload[26..28]); // which can be optional
+                    let content = &payload[28..].iter().map(|c| *c as char).collect::<String>();
+                    println!(
+                        "IPv{}: {}:{} -> {}:{} {}, content: {:?}",
+                        version,
+                        source_ip,
+                        source_port,
+                        destination_ip,
+                        destination_port,
+                        protocol,
+                        content,
+                    );
+                } else {
+                    println!("Unknown protocol occurred: {}", payload[9])
                 }
-                let content = &payload[content_start..content_end]
-                    .iter()
-                    .map(|c| *c as char)
-                    .collect::<String>();
-
-                println!(
-                    "{header_footer}IPv{}: {}:{} -> {}:{} {} using {}, content: {:?}{header_footer}",
-                    version,
-                    source_ip,
-                    source_port,
-                    destination_ip,
-                    destination_port,
-                    flag,
-                    protocol,
-                    content,
-                );
             }
             Err(e) => {
                 // If an error occurs, we can handle it here
