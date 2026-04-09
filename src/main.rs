@@ -27,7 +27,10 @@ fn main() {
         handle_summary(rx);
     });
 
-    producer.join().unwrap();
+    match producer.join() {
+        Ok(i) => println!("{:?}", i),
+        Err(i) => eprintln!("{:?}", i),
+    };
     consumer.join().unwrap();
 }
 
@@ -276,11 +279,43 @@ fn handle_receiving_packets(interface_name: &str, successful_sender: Sender<Pack
                     i => TransportLayerProtocol::Unknown(i),
                 };
                 // 16 bit checksum for checking errors in datagram header
-                let _header_checksum = &payload[10..12];
+                let header_checksum = (payload[10] as u16) << 8 | (payload[11] as u16);
                 // 32 bits ip address of sender
                 let source_ip = join_nums(&payload[12..16], ".");
                 // 32 bits ip address of receiver
                 let destination_ip = join_nums(&payload[16..20], ".");
+
+                if let TransportLayerProtocol::Unknown(protocol_number) = protocol {
+                    successful_sender
+                        .send(PacketSuccessMetric::Fail(FailedPacketParsed {
+                            ip_version: version,
+                            protocol: protocol,
+                            source_location: source_ip,
+                            destination_location: destination_ip,
+                            reason_for_failure: format!(
+                                "Unknown protocol occurred: {}",
+                                protocol_number
+                            ),
+                        }))
+                        .unwrap();
+                    continue;
+                }
+                let calculated_checksum = calculate_ip_checksum(&payload);
+                if header_checksum != calculated_checksum {
+                    successful_sender
+                        .send(PacketSuccessMetric::Fail(FailedPacketParsed {
+                            ip_version: version,
+                            protocol: protocol,
+                            source_location: source_ip,
+                            destination_location: destination_ip,
+                            reason_for_failure: format!(
+                                "Checksum was not equal! Given: {}, but calculated: {}", // sucks because metrics get screwed
+                                header_checksum, calculated_checksum,
+                            ),
+                        }))
+                        .unwrap();
+                    continue;
+                }
 
                 if protocol == TransportLayerProtocol::TCP {
                     //// tcp header
@@ -381,12 +416,12 @@ fn handle_receiving_packets(interface_name: &str, successful_sender: Sender<Pack
                     successful_sender
                         .send(PacketSuccessMetric::Fail(FailedPacketParsed {
                             ip_version: version,
-                            protocol: protocol,
+                            protocol: protocol.clone(),
                             source_location: source_ip,
                             destination_location: destination_ip,
                             reason_for_failure: format!(
-                                "Unknown protocol occurred: {}",
-                                payload[9]
+                                "Unhandled protocol occurred: {}",
+                                protocol
                             ),
                         }))
                         .unwrap();
@@ -410,6 +445,21 @@ fn convert_binary_to_decimal(nums: &[u8]) -> usize {
     let str_nums: Vec<String> = nums.iter().map(|n| format!("{:0>8b}", n)).collect();
     let str_nums = str_nums.join("");
     usize::from_str_radix(&str_nums, 2).unwrap()
+}
+
+fn calculate_ip_checksum(nums: &[u8]) -> u16 {
+    let mut sum = 0u32;
+    for i in 0..10 {
+        if i == 5 {
+            continue; // skip checksum number
+        }
+        sum = sum.wrapping_add((nums[i * 2] as u32) << 8 | (nums[i * 2 + 1] as u32));
+    }
+    // One odd bit (carry) - could do during loop instead
+    while sum >> 16 != 0 {
+        sum = (sum & 0xFFFF) + (sum >> 16);
+    }
+    !(sum as u16) //1s complement
 }
 
 fn handle_tcp_flag(flag: &u8) -> String {
