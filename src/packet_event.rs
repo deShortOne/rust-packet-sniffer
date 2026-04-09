@@ -13,6 +13,7 @@ pub struct SuccessfulPacketParsed {
     pub content_size: usize,
 
     pub tcp_flag: String,
+    pub tcp_ttl: u8,
 }
 
 pub struct FailedPacketParsed {

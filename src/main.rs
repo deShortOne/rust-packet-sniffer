@@ -32,8 +32,8 @@ fn main() {
 }
 
 fn handle_summary(receiver: Receiver<PacketSuccessMetric>) {
-    let mut total_number_of_packets: usize = 0;
-    let mut fail_total_number_of_packets: usize = 0;
+    let mut total_number_of_successful_packets: usize = 0;
+    let mut total_number_of_failed_packets: usize = 0;
     let mut protocol_counts: HashMap<TransportLayerProtocol, usize> = HashMap::new();
     let mut failed_protocol_counts: HashMap<TransportLayerProtocol, usize> = HashMap::new();
     let mut total_bytes_captured: usize = 0;
@@ -45,6 +45,7 @@ fn handle_summary(receiver: Receiver<PacketSuccessMetric>) {
     // source_ip + destination_ip == destination_ip + source_ip
     let mut source_ips_to_destination_ips_pairs_counts: HashMap<String, usize> = HashMap::new();
     let mut tcp_flag_counts: HashMap<String, usize> = HashMap::new();
+    let mut total_ttl: usize = 0;
 
     let mut reasons_for_failure_count: HashMap<String, usize> = HashMap::new();
 
@@ -57,7 +58,16 @@ fn handle_summary(receiver: Receiver<PacketSuccessMetric>) {
         match receiver.recv_timeout(Duration::from_millis(100)) {
             Ok(metric) => match metric {
                 PacketSuccessMetric::Success(v) => {
-                    total_number_of_packets += 1;
+                    total_number_of_successful_packets += 1;
+
+                    if v.protocol == TransportLayerProtocol::TCP {
+                        tcp_flag_counts
+                            .entry(v.tcp_flag)
+                            .and_modify(|count| *count += 1)
+                            .or_insert(0);
+                        total_ttl += v.tcp_ttl as usize;
+                    }
+
                     protocol_counts
                         .entry(v.protocol)
                         .and_modify(|count| *count += 1)
@@ -69,14 +79,6 @@ fn handle_summary(receiver: Receiver<PacketSuccessMetric>) {
                         .entry(v.ip_version.to_string())
                         .and_modify(|count| *count += 1)
                         .or_insert(1);
-
-                    if v.tcp_flag != "" {
-                        tcp_flag_counts
-                            .entry(v.tcp_flag)
-                            .and_modify(|count| *count += 1)
-                            .or_insert(0);
-                    }
-
                     let source_ip_to_destination_ip =
                         format!("{}->{}", v.source_location, v.destination_location);
                     source_ips_to_destination_ips_counts
@@ -100,8 +102,7 @@ fn handle_summary(receiver: Receiver<PacketSuccessMetric>) {
                     }
                 }
                 PacketSuccessMetric::Fail(v) => {
-                    total_number_of_packets += 1;
-                    fail_total_number_of_packets += 1;
+                    total_number_of_failed_packets += 1;
                     ip_version_counts
                         .entry(v.ip_version.to_string())
                         .and_modify(|count| *count += 1)
@@ -147,8 +148,23 @@ fn handle_summary(receiver: Receiver<PacketSuccessMetric>) {
 
             println!(
                 "Captured {} packets with a total of {} bytes captured",
-                total_number_of_packets, total_bytes_captured,
+                total_number_of_successful_packets + total_number_of_failed_packets,
+                total_bytes_captured,
             );
+
+            if let Some(value) = protocol_counts.get(&TransportLayerProtocol::TCP) {
+                println!(
+                    "Captured {} successful packets with an average ttl of {} for {:?} tcp packets",
+                    total_number_of_successful_packets,
+                    total_ttl / (*value),
+                    *value,
+                );
+            } else {
+                println!(
+                    "Captured {} successful packets with no tcp packets",
+                    total_number_of_successful_packets,
+                );
+            }
 
             print_biggest_value_for_key(&ip_version_counts, "is the most ip version with count");
             print_biggest_value_for_key(
@@ -163,9 +179,9 @@ fn handle_summary(receiver: Receiver<PacketSuccessMetric>) {
 
             println!(
                 "{} packets failed to be parsed",
-                fail_total_number_of_packets,
+                total_number_of_failed_packets,
             );
-            if fail_total_number_of_packets > 0 {
+            if total_number_of_failed_packets > 0 {
                 print_biggest_value_for_key(
                     &failed_ip_version_counts,
                     "is the most ip version that failed with count",
@@ -251,7 +267,7 @@ fn handle_receiving_packets(interface_name: &str, successful_sender: Sender<Pack
                 // represents number of data bytes ahead of the particular fragment in the particular datagram
                 let _fragment_offset = &payload[6..8];
                 // restruct number of hops taken by packet before delivering to the destination
-                let _ttl = payload[8];
+                let ttl = payload[8];
                 // name of protocol: tcp, udp
                 let protocol = match payload[9] {
                     //https://en.wikipedia.org/wiki/List_of_IP_protocol_numbers
@@ -326,6 +342,7 @@ fn handle_receiving_packets(interface_name: &str, successful_sender: Sender<Pack
                             ),
                             content_size: content.len(),
                             tcp_flag: flag,
+                            tcp_ttl: ttl,
                         }))
                         .unwrap();
                 } else if protocol == TransportLayerProtocol::UDP {
@@ -355,7 +372,9 @@ fn handle_receiving_packets(interface_name: &str, successful_sender: Sender<Pack
                                 destination_ip, destination_port
                             ),
                             content_size: content.len(),
+
                             tcp_flag: String::new(),
+                            tcp_ttl: 0,
                         }))
                         .unwrap();
                 } else {
