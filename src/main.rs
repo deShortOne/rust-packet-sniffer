@@ -1,5 +1,6 @@
 extern crate pnet;
 
+mod packet_event;
 mod transport_layer_protocol;
 
 use pnet::datalink::Channel::Ethernet;
@@ -8,13 +9,134 @@ use pnet::packet::Packet;
 use pnet::packet::ethernet::EthernetPacket;
 
 use std::cmp::min;
+use std::collections::HashMap;
 use std::env;
+use std::sync::mpsc::{self, Receiver, Sender};
+use std::thread;
+use std::time::{Duration, Instant};
 
+use crate::packet_event::SuccessfulPacketParsed;
 use crate::transport_layer_protocol::TransportLayerProtocol;
 
-// Invoke as echo <interface name>
 fn main() {
-    let interface_name = env::args().nth(1).unwrap();
+    let (tx, rx) = mpsc::channel::<SuccessfulPacketParsed>();
+    let producer = thread::spawn(move || {
+        handle_receiving_packets(&env::args().nth(1).unwrap(), tx);
+    });
+    let consumer = thread::spawn(move || {
+        handle_summary(rx);
+    });
+
+    producer.join().unwrap();
+    consumer.join().unwrap();
+}
+
+fn handle_summary(receiver: Receiver<SuccessfulPacketParsed>) {
+    let mut total_number_of_packets: usize = 0;
+    let mut protocol_counts: HashMap<TransportLayerProtocol, usize> = HashMap::new();
+    let mut total_bytes_captured: usize = 0;
+    let mut ip_version_counts: HashMap<String, usize> = HashMap::new();
+    // source_ip + destination_ip != destination_ip + source_ip
+    let mut source_ips_to_destination_ips_counts: HashMap<String, usize> = HashMap::new();
+    // source_ip + destination_ip == destination_ip + source_ip
+    let mut source_ips_to_destination_ips_pairs_counts: HashMap<String, usize> = HashMap::new();
+    let mut tcp_flag_counts: HashMap<String, usize> = HashMap::new();
+    let seperator = "========================================";
+
+    let mut last_print = Instant::now();
+
+    loop {
+        // Try receiving with timeout so we can check time periodically
+        match receiver.recv_timeout(Duration::from_millis(100)) {
+            Ok(v) => {
+                total_number_of_packets += 1;
+                protocol_counts
+                    .entry(v.protocol)
+                    .and_modify(|count| *count += 1)
+                    .or_insert(0);
+
+                total_bytes_captured += v.content_size;
+
+                ip_version_counts
+                    .entry(v.ip_version.to_string())
+                    .and_modify(|count| *count += 1)
+                    .or_insert(1);
+
+                if v.tcp_flag != "" {
+                    tcp_flag_counts
+                        .entry(v.tcp_flag)
+                        .and_modify(|count| *count += 1)
+                        .or_insert(0);
+                }
+
+                let source_ip_to_destination_ip =
+                    format!("{}->{}", v.source_location, v.destination_location);
+                source_ips_to_destination_ips_counts
+                    .entry(source_ip_to_destination_ip.clone())
+                    .and_modify(|count| *count += 1)
+                    .or_insert(0);
+
+                if source_ips_to_destination_ips_pairs_counts
+                    .contains_key(&source_ip_to_destination_ip)
+                {
+                    source_ips_to_destination_ips_pairs_counts
+                        .entry(source_ip_to_destination_ip)
+                        .and_modify(|count| *count += 1);
+                } else {
+                    let destination_ip_to_source_ip =
+                        format!("{}->{}", v.destination_location, v.source_location);
+                    source_ips_to_destination_ips_pairs_counts
+                        .entry(destination_ip_to_source_ip)
+                        .and_modify(|count| *count += 1)
+                        .or_insert(1);
+                }
+            }
+            Err(mpsc::RecvTimeoutError::Timeout) => {}
+            Err(_) => break, // channel closed
+        }
+
+        // Every 10 seconds, compute mean
+        if last_print.elapsed() >= Duration::from_secs(10) {
+            println!("{0}\n{0}\n{0}", seperator);
+
+            println!(
+                "Captured {} packets with a total of {} bytes captured",
+                total_number_of_packets, total_bytes_captured,
+            );
+
+            a(&ip_version_counts, "is the most ip version with count");
+            a(
+                &source_ips_to_destination_ips_counts,
+                "has the biggest count of",
+            );
+            a(
+                &source_ips_to_destination_ips_pairs_counts,
+                "pair has the biggest count of",
+            );
+            a(&tcp_flag_counts, "has the most flag count of");
+
+            println!("{0}\n{0}\n{0}", seperator);
+            last_print = Instant::now();
+        }
+    }
+}
+
+fn a(dict_to_check: &HashMap<String, usize>, custom_middle_text: &str) {
+    let mut biggest_count: usize = 0;
+    let mut source_ip_to_destination_ip_of_biggest_count = String::new();
+    for (key, value) in dict_to_check {
+        if *value > biggest_count {
+            biggest_count = *value;
+            source_ip_to_destination_ip_of_biggest_count = key.clone();
+        }
+    }
+    println!("{source_ip_to_destination_ip_of_biggest_count} {custom_middle_text} {biggest_count}");
+}
+
+fn handle_receiving_packets(
+    interface_name: &str,
+    successful_sender: Sender<SuccessfulPacketParsed>,
+) {
     let interface_names_match = |iface: &NetworkInterface| iface.name == interface_name;
 
     // Find the network interface with the provided name
@@ -120,7 +242,6 @@ fn main() {
                         .iter()
                         .map(|c| *c as char)
                         .collect::<String>();
-
                     println!(
                         "{header_footer}IPv{}: {}:{} -> {}:{} {} using {}, content: {:?}{header_footer}",
                         version,
@@ -132,6 +253,19 @@ fn main() {
                         protocol,
                         content,
                     );
+                    successful_sender
+                        .send(SuccessfulPacketParsed {
+                            ip_version: version,
+                            protocol: protocol,
+                            source_location: format!("{}:{}", source_ip, source_port),
+                            destination_location: format!(
+                                "{}:{}",
+                                destination_ip, destination_port
+                            ),
+                            content_size: content.len(),
+                            tcp_flag: flag,
+                        })
+                        .unwrap();
                 } else if protocol == TransportLayerProtocol::UDP {
                     //// udp header
                     let source_port = convert_binary_to_decimal(&payload[20..22]);
@@ -149,6 +283,19 @@ fn main() {
                         protocol,
                         content,
                     );
+                    successful_sender
+                        .send(SuccessfulPacketParsed {
+                            ip_version: version,
+                            protocol: protocol,
+                            source_location: format!("{}:{}", source_ip, source_port),
+                            destination_location: format!(
+                                "{}:{}",
+                                destination_ip, destination_port
+                            ),
+                            content_size: content.len(),
+                            tcp_flag: String::new(),
+                        })
+                        .unwrap();
                 } else {
                     println!("Unknown protocol occurred: {}", payload[9])
                 }

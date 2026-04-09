@@ -1,6 +1,6 @@
 use std::fmt;
 
-#[derive(PartialEq, Eq)]
+#[derive(PartialEq, Eq, Hash)]
 pub enum TransportLayerProtocol {
     TCP,
     UDP,
