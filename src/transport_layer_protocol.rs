@@ -1,10 +1,10 @@
 use std::fmt;
 
-#[derive(PartialEq, Eq, Hash)]
+#[derive(PartialEq, Eq, Hash, Clone)]
 pub enum TransportLayerProtocol {
     TCP,
     UDP,
-    Unknown,
+    Unknown(u8),
 }
 
 impl fmt::Display for TransportLayerProtocol {
@@ -12,7 +12,7 @@ impl fmt::Display for TransportLayerProtocol {
         match *self {
             TransportLayerProtocol::TCP => write!(f, "TCP"),
             TransportLayerProtocol::UDP => write!(f, "UDP"),
-            TransportLayerProtocol::Unknown => write!(f, "UNKNOWN"),
+            TransportLayerProtocol::Unknown(i) => write!(f, "UNKNOWN protocol: {}", i),
         }
     }
 }

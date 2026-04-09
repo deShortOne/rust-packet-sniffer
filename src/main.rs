@@ -15,11 +15,11 @@ use std::sync::mpsc::{self, Receiver, Sender};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use crate::packet_event::SuccessfulPacketParsed;
+use crate::packet_event::{FailedPacketParsed, PacketSuccessMetric, SuccessfulPacketParsed};
 use crate::transport_layer_protocol::TransportLayerProtocol;
 
 fn main() {
-    let (tx, rx) = mpsc::channel::<SuccessfulPacketParsed>();
+    let (tx, rx) = mpsc::channel::<PacketSuccessMetric>();
     let producer = thread::spawn(move || {
         handle_receiving_packets(&env::args().nth(1).unwrap(), tx);
     });
@@ -31,16 +31,23 @@ fn main() {
     consumer.join().unwrap();
 }
 
-fn handle_summary(receiver: Receiver<SuccessfulPacketParsed>) {
+fn handle_summary(receiver: Receiver<PacketSuccessMetric>) {
     let mut total_number_of_packets: usize = 0;
+    let mut fail_total_number_of_packets: usize = 0;
     let mut protocol_counts: HashMap<TransportLayerProtocol, usize> = HashMap::new();
+    let mut failed_protocol_counts: HashMap<TransportLayerProtocol, usize> = HashMap::new();
     let mut total_bytes_captured: usize = 0;
     let mut ip_version_counts: HashMap<String, usize> = HashMap::new();
+    let mut failed_ip_version_counts: HashMap<String, usize> = HashMap::new();
     // source_ip + destination_ip != destination_ip + source_ip
     let mut source_ips_to_destination_ips_counts: HashMap<String, usize> = HashMap::new();
+    let mut failed_source_ips_to_destination_ips_counts: HashMap<String, usize> = HashMap::new();
     // source_ip + destination_ip == destination_ip + source_ip
     let mut source_ips_to_destination_ips_pairs_counts: HashMap<String, usize> = HashMap::new();
     let mut tcp_flag_counts: HashMap<String, usize> = HashMap::new();
+
+    let mut reasons_for_failure_count: HashMap<String, usize> = HashMap::new();
+
     let seperator = "========================================";
 
     let mut last_print = Instant::now();
@@ -48,49 +55,88 @@ fn handle_summary(receiver: Receiver<SuccessfulPacketParsed>) {
     loop {
         // Try receiving with timeout so we can check time periodically
         match receiver.recv_timeout(Duration::from_millis(100)) {
-            Ok(v) => {
-                total_number_of_packets += 1;
-                protocol_counts
-                    .entry(v.protocol)
-                    .and_modify(|count| *count += 1)
-                    .or_insert(0);
+            Ok(metric) => match metric {
+                PacketSuccessMetric::Success(v) => {
+                    total_number_of_packets += 1;
+                    protocol_counts
+                        .entry(v.protocol)
+                        .and_modify(|count| *count += 1)
+                        .or_insert(0);
 
-                total_bytes_captured += v.content_size;
+                    total_bytes_captured += v.content_size;
 
-                ip_version_counts
-                    .entry(v.ip_version.to_string())
-                    .and_modify(|count| *count += 1)
-                    .or_insert(1);
+                    ip_version_counts
+                        .entry(v.ip_version.to_string())
+                        .and_modify(|count| *count += 1)
+                        .or_insert(1);
 
-                if v.tcp_flag != "" {
-                    tcp_flag_counts
-                        .entry(v.tcp_flag)
+                    if v.tcp_flag != "" {
+                        tcp_flag_counts
+                            .entry(v.tcp_flag)
+                            .and_modify(|count| *count += 1)
+                            .or_insert(0);
+                    }
+
+                    let source_ip_to_destination_ip =
+                        format!("{}->{}", v.source_location, v.destination_location);
+                    source_ips_to_destination_ips_counts
+                        .entry(source_ip_to_destination_ip.clone())
+                        .and_modify(|count| *count += 1)
+                        .or_insert(0);
+
+                    if source_ips_to_destination_ips_pairs_counts
+                        .contains_key(&source_ip_to_destination_ip)
+                    {
+                        source_ips_to_destination_ips_pairs_counts
+                            .entry(source_ip_to_destination_ip)
+                            .and_modify(|count| *count += 1);
+                    } else {
+                        let destination_ip_to_source_ip =
+                            format!("{}->{}", v.destination_location, v.source_location);
+                        source_ips_to_destination_ips_pairs_counts
+                            .entry(destination_ip_to_source_ip)
+                            .and_modify(|count| *count += 1)
+                            .or_insert(1);
+                    }
+                }
+                PacketSuccessMetric::Fail(v) => {
+                    total_number_of_packets += 1;
+                    fail_total_number_of_packets += 1;
+                    ip_version_counts
+                        .entry(v.ip_version.to_string())
+                        .and_modify(|count| *count += 1)
+                        .or_insert(1);
+                    failed_ip_version_counts
+                        .entry(v.ip_version.to_string())
+                        .and_modify(|count| *count += 1)
+                        .or_insert(1);
+
+                    protocol_counts
+                        .entry(v.protocol.clone())
+                        .and_modify(|count| *count += 1)
+                        .or_insert(0);
+                    failed_protocol_counts
+                        .entry(v.protocol)
+                        .and_modify(|count| *count += 1)
+                        .or_insert(0);
+
+                    let source_ip_to_destination_ip =
+                        format!("{}->{}", v.source_location, v.destination_location);
+                    source_ips_to_destination_ips_counts
+                        .entry(source_ip_to_destination_ip.clone())
+                        .and_modify(|count| *count += 1)
+                        .or_insert(0);
+                    failed_source_ips_to_destination_ips_counts
+                        .entry(source_ip_to_destination_ip.clone())
+                        .and_modify(|count| *count += 1)
+                        .or_insert(0);
+
+                    reasons_for_failure_count
+                        .entry(v.reason_for_failure)
                         .and_modify(|count| *count += 1)
                         .or_insert(0);
                 }
-
-                let source_ip_to_destination_ip =
-                    format!("{}->{}", v.source_location, v.destination_location);
-                source_ips_to_destination_ips_counts
-                    .entry(source_ip_to_destination_ip.clone())
-                    .and_modify(|count| *count += 1)
-                    .or_insert(0);
-
-                if source_ips_to_destination_ips_pairs_counts
-                    .contains_key(&source_ip_to_destination_ip)
-                {
-                    source_ips_to_destination_ips_pairs_counts
-                        .entry(source_ip_to_destination_ip)
-                        .and_modify(|count| *count += 1);
-                } else {
-                    let destination_ip_to_source_ip =
-                        format!("{}->{}", v.destination_location, v.source_location);
-                    source_ips_to_destination_ips_pairs_counts
-                        .entry(destination_ip_to_source_ip)
-                        .and_modify(|count| *count += 1)
-                        .or_insert(1);
-                }
-            }
+            },
             Err(mpsc::RecvTimeoutError::Timeout) => {}
             Err(_) => break, // channel closed
         }
@@ -104,16 +150,35 @@ fn handle_summary(receiver: Receiver<SuccessfulPacketParsed>) {
                 total_number_of_packets, total_bytes_captured,
             );
 
-            a(&ip_version_counts, "is the most ip version with count");
-            a(
+            print_biggest_value_for_key(&ip_version_counts, "is the most ip version with count");
+            print_biggest_value_for_key(
                 &source_ips_to_destination_ips_counts,
                 "has the biggest count of",
             );
-            a(
+            print_biggest_value_for_key(
                 &source_ips_to_destination_ips_pairs_counts,
                 "pair has the biggest count of",
             );
-            a(&tcp_flag_counts, "has the most flag count of");
+            print_biggest_value_for_key(&tcp_flag_counts, "has the most flag count of");
+
+            println!(
+                "{} packets failed to be parsed",
+                fail_total_number_of_packets,
+            );
+            if fail_total_number_of_packets > 0 {
+                print_biggest_value_for_key(
+                    &failed_ip_version_counts,
+                    "is the most ip version that failed with count",
+                );
+                print_biggest_value_for_key(
+                    &failed_source_ips_to_destination_ips_counts,
+                    "has the biggest failure count of",
+                );
+                print_biggest_value_for_key(
+                    &reasons_for_failure_count,
+                    "is the biggest reason for failure with a count of",
+                );
+            }
 
             println!("{0}\n{0}\n{0}", seperator);
             last_print = Instant::now();
@@ -121,7 +186,7 @@ fn handle_summary(receiver: Receiver<SuccessfulPacketParsed>) {
     }
 }
 
-fn a(dict_to_check: &HashMap<String, usize>, custom_middle_text: &str) {
+fn print_biggest_value_for_key(dict_to_check: &HashMap<String, usize>, custom_middle_text: &str) {
     let mut biggest_count: usize = 0;
     let mut source_ip_to_destination_ip_of_biggest_count = String::new();
     for (key, value) in dict_to_check {
@@ -133,10 +198,7 @@ fn a(dict_to_check: &HashMap<String, usize>, custom_middle_text: &str) {
     println!("{source_ip_to_destination_ip_of_biggest_count} {custom_middle_text} {biggest_count}");
 }
 
-fn handle_receiving_packets(
-    interface_name: &str,
-    successful_sender: Sender<SuccessfulPacketParsed>,
-) {
+fn handle_receiving_packets(interface_name: &str, successful_sender: Sender<PacketSuccessMetric>) {
     let interface_names_match = |iface: &NetworkInterface| iface.name == interface_name;
 
     // Find the network interface with the provided name
@@ -195,7 +257,7 @@ fn handle_receiving_packets(
                     //https://en.wikipedia.org/wiki/List_of_IP_protocol_numbers
                     6 => TransportLayerProtocol::TCP,
                     17 => TransportLayerProtocol::UDP,
-                    _ => TransportLayerProtocol::Unknown,
+                    i => TransportLayerProtocol::Unknown(i),
                 };
                 // 16 bit checksum for checking errors in datagram header
                 let _header_checksum = &payload[10..12];
@@ -254,7 +316,7 @@ fn handle_receiving_packets(
                         content,
                     );
                     successful_sender
-                        .send(SuccessfulPacketParsed {
+                        .send(PacketSuccessMetric::Success(SuccessfulPacketParsed {
                             ip_version: version,
                             protocol: protocol,
                             source_location: format!("{}:{}", source_ip, source_port),
@@ -264,7 +326,7 @@ fn handle_receiving_packets(
                             ),
                             content_size: content.len(),
                             tcp_flag: flag,
-                        })
+                        }))
                         .unwrap();
                 } else if protocol == TransportLayerProtocol::UDP {
                     //// udp header
@@ -284,7 +346,7 @@ fn handle_receiving_packets(
                         content,
                     );
                     successful_sender
-                        .send(SuccessfulPacketParsed {
+                        .send(PacketSuccessMetric::Success(SuccessfulPacketParsed {
                             ip_version: version,
                             protocol: protocol,
                             source_location: format!("{}:{}", source_ip, source_port),
@@ -294,10 +356,21 @@ fn handle_receiving_packets(
                             ),
                             content_size: content.len(),
                             tcp_flag: String::new(),
-                        })
+                        }))
                         .unwrap();
                 } else {
-                    println!("Unknown protocol occurred: {}", payload[9])
+                    successful_sender
+                        .send(PacketSuccessMetric::Fail(FailedPacketParsed {
+                            ip_version: version,
+                            protocol: protocol,
+                            source_location: source_ip,
+                            destination_location: destination_ip,
+                            reason_for_failure: format!(
+                                "Unknown protocol occurred: {}",
+                                payload[9]
+                            ),
+                        }))
+                        .unwrap();
                 }
             }
             Err(e) => {
