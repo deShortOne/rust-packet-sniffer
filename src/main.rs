@@ -300,7 +300,7 @@ fn handle_receiving_packets(interface_name: &str, successful_sender: Sender<Pack
                         .unwrap();
                     continue;
                 }
-                let calculated_checksum = calculate_ip_checksum(&payload);
+                let calculated_checksum = calculate_ip_header_checksum(&payload);
                 if header_checksum != calculated_checksum {
                     successful_sender
                         .send(PacketSuccessMetric::Fail(FailedPacketParsed {
@@ -330,7 +330,7 @@ fn handle_receiving_packets(interface_name: &str, successful_sender: Sender<Pack
                     };
                     let flag = handle_tcp_flag(&payload[33]);
                     let _window_size = convert_binary_to_decimal(&payload[34..36]);
-                    let _check_sum = convert_binary_to_decimal(&payload[36..38]);
+                    let check_sum = (payload[36] as u16) << 8 | (payload[37] as u16);
                     let _urgent_pointer = convert_binary_to_decimal(&payload[38..40]);
                     // skipping tcp options
 
@@ -355,17 +355,28 @@ fn handle_receiving_packets(interface_name: &str, successful_sender: Sender<Pack
                         .iter()
                         .map(|c| *c as char)
                         .collect::<String>();
-                    println!(
-                        "{header_footer}IPv{}: {}:{} -> {}:{} {} using {}, content: {:?}{header_footer}",
-                        version,
-                        source_ip,
-                        source_port,
-                        destination_ip,
-                        destination_port,
-                        flag,
-                        protocol,
-                        content,
+
+                    let tcp_start = ihl as usize;
+                    let a = calculate_tcp_checksum(
+                        &payload[12..16],
+                        &payload[16..20],
+                        &payload[tcp_start..],
                     );
+
+                    println!("Given {}, calculated {}", check_sum, a);
+
+                    // println!(
+                    //     "{header_footer}IPv{}: {}:{} -> {}:{} {} using {}, content: {:?}{header_footer}",
+                    //     version,
+                    //     source_ip,
+                    //     source_port,
+                    //     destination_ip,
+                    //     destination_port,
+                    //     flag,
+                    //     protocol,
+                    //     content,
+                    // );
+                    println!("{:?}", &payload);
                     successful_sender
                         .send(PacketSuccessMetric::Success(SuccessfulPacketParsed {
                             ip_version: version,
@@ -447,13 +458,13 @@ fn convert_binary_to_decimal(nums: &[u8]) -> usize {
     usize::from_str_radix(&str_nums, 2).unwrap()
 }
 
-fn calculate_ip_checksum(nums: &[u8]) -> u16 {
+fn calculate_ip_header_checksum(payload: &[u8]) -> u16 {
     let mut sum = 0u32;
     for i in 0..10 {
         if i == 5 {
             continue; // skip checksum number
         }
-        sum = sum.wrapping_add((nums[i * 2] as u32) << 8 | (nums[i * 2 + 1] as u32));
+        sum = sum.wrapping_add((payload[i * 2] as u32) << 8 | (payload[i * 2 + 1] as u32));
     }
     // One odd bit (carry) - could do during loop instead
     while sum >> 16 != 0 {
@@ -501,4 +512,162 @@ fn handle_tcp_flag(flag: &u8) -> String {
         return String::from("UNKNOWN FLAG");
     }
     res.join("-")
+}
+
+fn calculate_tcp_checksum(source_ip: &[u8], destination_ip: &[u8], tcp_segment: &[u8]) -> u16 {
+    let mut sum = 0u32;
+    // Pseudo-header: src IP, dst IP, protocol (0), TCP length
+    sum = sum.wrapping_add((source_ip[0] as u32) << 8 | source_ip[1] as u32);
+    sum = sum.wrapping_add((source_ip[2] as u32) << 8 | source_ip[3] as u32);
+    sum = sum.wrapping_add((destination_ip[0] as u32) << 8 | destination_ip[1] as u32);
+    sum = sum.wrapping_add((destination_ip[2] as u32) << 8 | destination_ip[3] as u32);
+    sum = sum.wrapping_add(6); // TCP protocol
+
+    sum = sum.wrapping_add(tcp_segment.len() as u32);
+    // Add TCP segment
+    for i in (0..tcp_segment.len()).step_by(2) {
+        if i == 16 {
+            continue; // skipping checksum
+        }
+        let word = if i + 1 < tcp_segment.len() {
+            (tcp_segment[i] as u32) << 8 | tcp_segment[i + 1] as u32
+        } else {
+            (tcp_segment[i] as u32) << 8
+        };
+        sum = sum.wrapping_add(word);
+    }
+    while sum >> 16 != 0 {
+        sum = (sum & 0xFFFF) + (sum >> 16);
+    }
+    !(sum as u16)
+}
+
+fn compute_checksum(data: &[u8]) -> u16 {
+    let mut sum: u32 = 0;
+
+    let mut chunks = data.chunks_exact(2);
+    for chunk in &mut chunks {
+        let word = u16::from_be_bytes([chunk[0], chunk[1]]) as u32;
+        sum += word;
+    }
+
+    if let Some(&rem) = chunks.remainder().first() {
+        sum += (rem as u32) << 8;
+    }
+
+    // Fold 32-bit sum to 16 bits
+    while (sum >> 16) != 0 {
+        sum = (sum & 0xFFFF) + (sum >> 16);
+    }
+
+    !(sum as u16)
+}
+
+fn tcp_checksum(ip_packet: &[u8]) -> u16 {
+    let ip_header_len = (ip_packet[0] & 0x0F) as usize * 4;
+
+    let src_ip = &ip_packet[12..16];
+    let dst_ip = &ip_packet[16..20];
+
+    let tcp_segment = &ip_packet[ip_header_len..];
+    let tcp_len = tcp_segment.len() as u16;
+
+    let mut pseudo_packet = Vec::new();
+
+    // Pseudo-header
+    pseudo_packet.extend_from_slice(src_ip);
+    pseudo_packet.extend_from_slice(dst_ip);
+    pseudo_packet.push(0); // reserved
+    pseudo_packet.push(6); // TCP protocol
+    pseudo_packet.extend_from_slice(&tcp_len.to_be_bytes());
+
+    // TCP segment (with checksum zeroed)
+    let mut tcp_copy = tcp_segment.to_vec();
+    tcp_copy[16] = 0;
+    tcp_copy[17] = 0;
+
+    pseudo_packet.extend_from_slice(&tcp_copy);
+
+    compute_checksum(&pseudo_packet)
+}
+
+#[cfg(test)]
+mod tcp_checksum_test {
+    use super::*;
+
+    fn simple_calc() {
+        let source_ip: [u8; 4] = [192, 168, 0, 1];
+        let destination_ip: [u8; 4] = [192, 168, 0, 2];
+
+        let tcp_header: [u8; 20] = [
+            31, 144, // source port
+            0, 80, // destination port
+            0, 0, 0, 1, // seq
+            0, 0, 0, 0, // ack
+            80, 24, // flags
+            255, 255, // window
+            0, 0, // checksum
+            0, 0, // urgent pointer
+        ];
+        let protocol: u8 = 6;
+        let tcp_length: [u8; 2] = [0, 18];
+    }
+
+    #[test]
+    fn test_tcp_checksum() {
+        let packet: Vec<u8> = vec![
+            69, 0, 0, 161, 84, 147, 64, 0, 64, 6, 141, 158, 172, 17, 0, 2, 172, 17, 0, 1, 21, 56,
+            197, 160, 105, 109, 248, 249, 187, 236, 13, 17, 128, 24, 2, 115, 88, 185, 0, 0, 1, 1,
+            8, 10, 57, 250, 123, 103, 214, 232, 250, 0, 49, 0, 0, 0, 4, 50, 0, 0, 0, 4, 84, 0, 0,
+            0, 54, 0, 2, 111, 105, 100, 0, 0, 0, 4, 223, 0, 1, 0, 0, 0, 26, 0, 4, 255, 255, 255,
+            255, 0, 0, 116, 121, 112, 110, 97, 109, 101, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 25, 255,
+            255, 255, 255, 255, 255, 0, 0, 68, 0, 0, 0, 23, 0, 2, 0, 0, 0, 2, 50, 51, 0, 0, 0, 7,
+            105, 110, 116, 101, 103, 101, 114, 67, 0, 0, 0, 13, 83, 69, 76, 69, 67, 84, 32, 49, 0,
+            90, 0, 0, 0, 5,
+        ];
+
+        let checksum = tcp_checksum(&packet);
+
+        // Expected checksum from packet = 0x58b9
+        assert_eq!(checksum, 0x58b9);
+    }
+
+    // #[test]
+    // fn test_tcp_checksum() {
+    //     let packet: Vec<u8> = vec![
+    //         69, 0, 0, 161, 84, 147, 64, 0, 64, 6, 141, 158, 172, 17, 0, 2, 172, 17, 0, 1, 21, 56,
+    //         197, 160, 105, 109, 248, 249, 187, 236, 13, 17, 128, 24, 2, 115, 88, 185, 0, 0, 1, 1,
+    //         8, 10, 57, 250, 123, 103, 214, 232, 250, 0, 49, 0, 0, 0, 4, 50, 0, 0, 0, 4, 84, 0, 0,
+    //         0, 54, 0, 2, 111, 105, 100, 0, 0, 0, 4, 223, 0, 1, 0, 0, 0, 26, 0, 4, 255, 255, 255,
+    //         255, 0, 0, 116, 121, 112, 110, 97, 109, 101, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 25, 255,
+    //         255, 255, 255, 255, 255, 0, 0, 68, 0, 0, 0, 23, 0, 2, 0, 0, 0, 2, 50, 51, 0, 0, 0, 7,
+    //         105, 110, 116, 101, 103, 101, 114, 67, 0, 0, 0, 13, 83, 69, 76, 69, 67, 84, 32, 49, 0,
+    //         90, 0, 0, 0, 5, 73,
+    //     ];
+
+    //     // --- Parse IPv4 header ---
+    //     let ihl = (packet[0] & 0x0F) * 4;
+    //     let ihl = ihl as usize;
+
+    //     let total_length = u16::from_be_bytes([packet[2], packet[3]]) as usize;
+
+    //     let src_ip = &packet[12..16];
+    //     let dst_ip = &packet[16..20];
+
+    //     // --- Extract TCP segment correctly ---
+    //     let tcp_segment = &packet[ihl..total_length];
+
+    //     // --- Copy and zero checksum field ---
+    //     let mut tcp_copy = tcp_segment.to_vec();
+    //     tcp_copy[16] = 0;
+    //     tcp_copy[17] = 0;
+
+    //     let tcp_length = (total_length - ihl) as u16;
+
+    //     let computed = calculate_tcp_checksumA(src_ip, dst_ip, &tcp_copy, tcp_length);
+    //     assert_eq!(computed, 0x58B9);
+
+    //     let validation = calculate_tcp_checksumA(src_ip, dst_ip, tcp_segment, tcp_length);
+    //     assert_eq!(validation, 0xFFFF);
+    // }
 }
