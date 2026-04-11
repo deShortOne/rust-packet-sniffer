@@ -11,7 +11,7 @@ mod transport_layer_protocol;
 use pnet::datalink::Channel::Ethernet;
 use pnet::datalink::{self, NetworkInterface};
 use pnet::packet::Packet;
-use pnet::packet::ethernet::EthernetPacket;
+use pnet::packet::ethernet::{EtherTypes, EthernetPacket};
 
 use std::collections::HashMap;
 use std::env;
@@ -22,7 +22,9 @@ use std::time::{Duration, Instant};
 use crate::checksum_status::ChecksumStatus;
 use crate::helper::convert_binary_to_decimal;
 use crate::ip_header::IpHeader;
-use crate::packet_event::{FailedPacketParsed, PacketSuccessMetric, SuccessfulPacketParsed};
+use crate::packet_event::{
+    FailedPacketParsed, NotHandledPacket, PacketSuccessMetric, SuccessfulPacketParsed,
+};
 use crate::transport_layer_protocol::TransportLayerProtocol;
 
 fn main() {
@@ -44,6 +46,7 @@ fn main() {
 fn handle_summary(receiver: Receiver<PacketSuccessMetric>) {
     let mut total_number_of_successful_packets: usize = 0;
     let mut total_number_of_failed_packets: usize = 0;
+    let mut total_number_of_dropped_packets: usize = 0;
     let mut protocol_counts: HashMap<TransportLayerProtocol, usize> = HashMap::new();
     let mut failed_protocol_counts: HashMap<TransportLayerProtocol, usize> = HashMap::new();
     let mut total_bytes_captured: usize = 0;
@@ -58,6 +61,7 @@ fn handle_summary(receiver: Receiver<PacketSuccessMetric>) {
     let mut total_ttl: usize = 0;
 
     let mut reasons_for_failure_count: HashMap<String, usize> = HashMap::new();
+    let mut dropped_packet_ethertypes: HashMap<String, usize> = HashMap::new();
 
     let seperator = "========================================";
 
@@ -147,6 +151,13 @@ fn handle_summary(receiver: Receiver<PacketSuccessMetric>) {
                         .and_modify(|count| *count += 1)
                         .or_insert(0);
                 }
+                PacketSuccessMetric::NotHandled(v) => {
+                    total_number_of_dropped_packets += 1;
+                    dropped_packet_ethertypes
+                        .entry(v.not_handled_ethertype)
+                        .and_modify(|count| *count += 1)
+                        .or_insert(1);
+                }
             },
             Err(mpsc::RecvTimeoutError::Timeout) => {}
             Err(_) => break, // channel closed
@@ -158,7 +169,9 @@ fn handle_summary(receiver: Receiver<PacketSuccessMetric>) {
 
             println!(
                 "Captured {} packets with a total of {} bytes captured",
-                total_number_of_successful_packets + total_number_of_failed_packets,
+                total_number_of_successful_packets
+                    + total_number_of_failed_packets
+                    + total_number_of_dropped_packets,
                 total_bytes_captured,
             );
 
@@ -187,10 +200,19 @@ fn handle_summary(receiver: Receiver<PacketSuccessMetric>) {
             );
             print_biggest_value_for_key(&tcp_flag_counts, "has the most flag count of");
 
+            println!("{} dropped packets", total_number_of_dropped_packets);
+            if total_number_of_dropped_packets > 0 {
+                print_biggest_value_for_key(
+                    &dropped_packet_ethertypes,
+                    "is most frequent reason for packet drop with count",
+                );
+            }
+
             println!(
                 "{} packets failed to be parsed",
                 total_number_of_failed_packets,
             );
+
             if total_number_of_failed_packets > 0 {
                 print_biggest_value_for_key(
                     &failed_ip_version_counts,
@@ -248,9 +270,24 @@ fn handle_receiving_packets(interface_name: &str, successful_sender: Sender<Pack
         match rx.next() {
             Ok(packet) => {
                 let packet = EthernetPacket::new(packet).unwrap();
+                if packet.get_ethertype() != EtherTypes::Ipv4 {
+                    successful_sender
+                        .send(PacketSuccessMetric::NotHandled(NotHandledPacket {
+                            not_handled_ethertype: packet.get_ethertype().to_string(),
+                        }))
+                        .unwrap();
+                    continue;
+                }
+
                 let payload = packet.payload();
 
-                let ip_header_and_data = IpHeader::new(payload);
+                let ip_header_and_data = match IpHeader::new(payload) {
+                    Ok(obj) => obj,
+                    Err(msg) => {
+                        eprintln!("failed to parse ip header due to {}", msg);
+                        continue;
+                    }
+                };
 
                 if let TransportLayerProtocol::Unknown(protocol_number) =
                     ip_header_and_data.protocol

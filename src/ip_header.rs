@@ -17,15 +17,25 @@ pub struct IpHeader<'a> {
 }
 
 impl<'a> IpHeader<'a> {
-    pub fn new(payload: &'a [u8]) -> Self {
+    pub fn new(payload: &'a [u8]) -> Result<Self, String> {
         let version_and_ihl = format!("{:x}", payload[0]);
         let version = match &version_and_ihl.chars().nth(0) {
             Some(c) => c.to_digit(10).unwrap(),
-            None => panic!("IpHeader version couldn't parse"),
+            None => {
+                return Err(format!(
+                    "IpHeader version couldn't parse, attempted from payload: {:?}",
+                    payload
+                ));
+            }
         };
         let ihl = 4 * match &version_and_ihl.chars().nth(1) {
             Some(c) => c.to_digit(10).unwrap(),
-            None => panic!("IpHeader ihl couldn't parse"),
+            None => {
+                return Err(format!(
+                    "IpHeader ihl couldn't parse, attempted from payload: {:?}",
+                    payload
+                ));
+            }
         };
 
         //// IPv4 header
@@ -55,7 +65,7 @@ impl<'a> IpHeader<'a> {
         let options = &payload[20..ihl as usize];
         let data = &payload[ihl as usize..];
 
-        Self {
+        Ok(Self {
             version,
             ihl,
             _tos: tos,
@@ -69,6 +79,6 @@ impl<'a> IpHeader<'a> {
             destination_ip,
             _options: options,
             data,
-        }
+        })
     }
 }

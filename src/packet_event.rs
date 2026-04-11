@@ -3,6 +3,7 @@ use crate::transport_layer_protocol::TransportLayerProtocol;
 pub enum PacketSuccessMetric {
     Success(SuccessfulPacketParsed),
     Fail(FailedPacketParsed),
+    NotHandled(NotHandledPacket),
 }
 
 pub struct SuccessfulPacketParsed {
@@ -23,4 +24,8 @@ pub struct FailedPacketParsed {
     pub destination_location: String,
 
     pub reason_for_failure: String,
+}
+
+pub struct NotHandledPacket {
+    pub not_handled_ethertype: String,
 }
