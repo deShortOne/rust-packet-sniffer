@@ -265,7 +265,7 @@ fn handle_receiving_packets(interface_name: &str, successful_sender: Sender<Pack
                 //// IPv4 header
                 // low delay, high throughput, reliability
                 let _tos = payload[1];
-                let _total_length = usize::from((payload[2] as u16) << 8 | (payload[3] as u16)); // payload 2 is part of but not sure what factor
+                let total_length = usize::from((payload[2] as u16) << 8 | (payload[3] as u16)); // payload 2 is part of but not sure what factor
                 // identification: unique packet id (16 bits)
                 // flags: 3 flags, 1 bit each, reserved bit (must be 0), do not fragment flag, more fragments flag
                 let _fragment = &payload[4..6];
@@ -358,14 +358,23 @@ fn handle_receiving_packets(interface_name: &str, successful_sender: Sender<Pack
                         .map(|c| *c as char)
                         .collect::<String>();
 
-                    let tcp_start = ihl as usize;
-                    let a = calculate_tcp_checksum(
+                    let a_number = total_length as u32 - ihl as u32 + payload[9] as u32;
+                    match compare_tcp_checksum(
                         &payload[12..16],
                         &payload[16..20],
-                        &payload[tcp_start..],
-                    );
-
-                    println!("Given {}, calculated {}", check_sum, a);
+                        &payload[ihl as usize..],
+                        a_number,
+                        check_sum,
+                    ) {
+                        ChecksumStatus::FullyMatched => println!("It fully matches!"),
+                        ChecksumStatus::PartialMatch => println!("It partially matches!"),
+                        ChecksumStatus::NoMatch(i) => {
+                            eprintln!(
+                                "ERROR - packet somehow received despite checksum not matching, expect {}, but got {}",
+                                check_sum, i
+                            )
+                        }
+                    };
 
                     println!(
                         "{header_footer}IPv{}: {}:{} -> {}:{} {} using {}, content: {:?}{header_footer}",
@@ -378,7 +387,6 @@ fn handle_receiving_packets(interface_name: &str, successful_sender: Sender<Pack
                         protocol,
                         content,
                     );
-                    println!("{:?}", &payload);
                     successful_sender
                         .send(PacketSuccessMetric::Success(SuccessfulPacketParsed {
                             ip_version: version,
@@ -514,34 +522,6 @@ fn handle_tcp_flag(flag: &u8) -> String {
         return String::from("UNKNOWN FLAG");
     }
     res.join("-")
-}
-
-fn calculate_tcp_checksum(source_ip: &[u8], destination_ip: &[u8], tcp_segment: &[u8]) -> u16 {
-    let mut sum = 0u32;
-    // Pseudo-header: src IP, dst IP, protocol (0), TCP length
-    sum = sum.wrapping_add((source_ip[0] as u32) << 8 | source_ip[1] as u32);
-    sum = sum.wrapping_add((source_ip[2] as u32) << 8 | source_ip[3] as u32);
-    sum = sum.wrapping_add((destination_ip[0] as u32) << 8 | destination_ip[1] as u32);
-    sum = sum.wrapping_add((destination_ip[2] as u32) << 8 | destination_ip[3] as u32);
-    sum = sum.wrapping_add(6); // TCP protocol
-
-    sum = sum.wrapping_add(tcp_segment.len() as u32);
-    // Add TCP segment
-    for i in (0..tcp_segment.len()).step_by(2) {
-        if i == 16 {
-            continue; // skipping checksum
-        }
-        let word = if i + 1 < tcp_segment.len() {
-            (tcp_segment[i] as u32) << 8 | tcp_segment[i + 1] as u32
-        } else {
-            (tcp_segment[i] as u32) << 8
-        };
-        sum = sum.wrapping_add(word);
-    }
-    while sum >> 16 != 0 {
-        sum = (sum & 0xFFFF) + (sum >> 16);
-    }
-    !(sum as u16)
 }
 
 fn compare_tcp_checksum(
