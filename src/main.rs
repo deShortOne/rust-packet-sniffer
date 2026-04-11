@@ -1,6 +1,9 @@
 extern crate pnet;
 
 mod checksum_status;
+mod custom_ip_address;
+mod helper;
+mod ip_header;
 mod packet_event;
 mod transport_layer_protocol;
 
@@ -12,12 +15,13 @@ use pnet::packet::ethernet::EthernetPacket;
 use std::cmp::min;
 use std::collections::HashMap;
 use std::env;
-use std::net::Ipv4Addr;
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::thread;
 use std::time::{Duration, Instant};
 
 use crate::checksum_status::ChecksumStatus;
+use crate::helper::convert_binary_to_decimal;
+use crate::ip_header::IpHeader;
 use crate::packet_event::{FailedPacketParsed, PacketSuccessMetric, SuccessfulPacketParsed};
 use crate::transport_layer_protocol::TransportLayerProtocol;
 
@@ -245,55 +249,18 @@ fn handle_receiving_packets(interface_name: &str, successful_sender: Sender<Pack
             Ok(packet) => {
                 let packet = EthernetPacket::new(packet).unwrap();
                 let payload = packet.payload();
-                let version_and_ihl = format!("{:x}", payload[0]);
-                let version = match &version_and_ihl.chars().nth(0) {
-                    Some(c) => c.to_digit(10).unwrap(),
-                    None => continue,
-                };
-                let ihl = 4 * match &version_and_ihl.chars().nth(1) {
-                    Some(c) => c.to_digit(10).unwrap(),
-                    None => continue,
-                };
-                if ihl != 20 {
-                    println!(
-                        "Received IPv{}: but IHL is {}, can only handle 20",
-                        version, ihl,
-                    );
-                    continue;
-                }
 
-                //// IPv4 header
-                // low delay, high throughput, reliability
-                let _tos = payload[1];
-                let total_length = usize::from((payload[2] as u16) << 8 | (payload[3] as u16)); // payload 2 is part of but not sure what factor
-                // identification: unique packet id (16 bits)
-                // flags: 3 flags, 1 bit each, reserved bit (must be 0), do not fragment flag, more fragments flag
-                let _fragment = &payload[4..6];
-                // represents number of data bytes ahead of the particular fragment in the particular datagram
-                let _fragment_offset = &payload[6..8];
-                // restruct number of hops taken by packet before delivering to the destination
-                let ttl = payload[8];
-                // name of protocol: tcp, udp
-                let protocol = match payload[9] {
-                    //https://en.wikipedia.org/wiki/List_of_IP_protocol_numbers
-                    6 => TransportLayerProtocol::TCP,
-                    17 => TransportLayerProtocol::UDP,
-                    i => TransportLayerProtocol::Unknown(i),
-                };
-                // 16 bit checksum for checking errors in datagram header
-                let header_checksum = (payload[10] as u16) << 8 | (payload[11] as u16);
-                // 32 bits ip address of sender
-                let source_ip = join_nums(&payload[12..16], ".");
-                // 32 bits ip address of receiver
-                let destination_ip = join_nums(&payload[16..20], ".");
+                let ip_header_and_data = IpHeader::new(payload);
 
-                if let TransportLayerProtocol::Unknown(protocol_number) = protocol {
+                if let TransportLayerProtocol::Unknown(protocol_number) =
+                    ip_header_and_data.protocol
+                {
                     successful_sender
                         .send(PacketSuccessMetric::Fail(FailedPacketParsed {
-                            ip_version: version,
-                            protocol: protocol,
-                            source_location: source_ip,
-                            destination_location: destination_ip,
+                            ip_version: ip_header_and_data.version,
+                            protocol: ip_header_and_data.protocol,
+                            source_location: ip_header_and_data.source_ip.to_string(),
+                            destination_location: ip_header_and_data.destination_ip.to_string(),
                             reason_for_failure: format!(
                                 "Unknown protocol occurred: {}",
                                 protocol_number
@@ -302,24 +269,25 @@ fn handle_receiving_packets(interface_name: &str, successful_sender: Sender<Pack
                         .unwrap();
                     continue;
                 }
+
                 let calculated_checksum = calculate_ip_header_checksum(&payload);
-                if header_checksum != calculated_checksum {
+                if ip_header_and_data.ip_header_checksum != calculated_checksum {
                     successful_sender
                         .send(PacketSuccessMetric::Fail(FailedPacketParsed {
-                            ip_version: version,
-                            protocol: protocol,
-                            source_location: source_ip,
-                            destination_location: destination_ip,
+                            ip_version: ip_header_and_data.version,
+                            protocol: ip_header_and_data.protocol,
+                            source_location: ip_header_and_data.source_ip.to_string(),
+                            destination_location: ip_header_and_data.destination_ip.to_string(),
                             reason_for_failure: format!(
                                 "Checksum was not equal! Given: {}, but calculated: {}", // sucks because metrics get screwed
-                                header_checksum, calculated_checksum,
+                                ip_header_and_data.ip_header_checksum, calculated_checksum,
                             ),
                         }))
                         .unwrap();
                     continue;
                 }
 
-                if protocol == TransportLayerProtocol::TCP {
+                if ip_header_and_data.protocol == TransportLayerProtocol::TCP {
                     //// tcp header
                     let source_port = convert_binary_to_decimal(&payload[20..22]);
                     let destination_port = convert_binary_to_decimal(&payload[22..24]);
@@ -336,7 +304,8 @@ fn handle_receiving_packets(interface_name: &str, successful_sender: Sender<Pack
                     let _urgent_pointer = convert_binary_to_decimal(&payload[38..40]);
                     // skipping tcp options
 
-                    let mut content_start: usize = ihl as usize + tcp_header_size as usize;
+                    let mut content_start: usize =
+                        ip_header_and_data.ihl as usize + tcp_header_size as usize;
                     let mut content_end: usize = payload.len();
                     let mut header_footer = "";
                     // assuming it's plain text postgres protocol
@@ -358,11 +327,13 @@ fn handle_receiving_packets(interface_name: &str, successful_sender: Sender<Pack
                         .map(|c| *c as char)
                         .collect::<String>();
 
-                    let a_number = total_length as u32 - ihl as u32 + payload[9] as u32;
+                    let a_number = ip_header_and_data.total_length as u32
+                        - ip_header_and_data.ihl as u32
+                        + payload[9] as u32;
                     match compare_tcp_checksum(
                         &payload[12..16],
                         &payload[16..20],
-                        &payload[ihl as usize..],
+                        &payload[ip_header_and_data.ihl as usize..],
                         a_number,
                         check_sum,
                     ) {
@@ -378,30 +349,33 @@ fn handle_receiving_packets(interface_name: &str, successful_sender: Sender<Pack
 
                     println!(
                         "{header_footer}IPv{}: {}:{} -> {}:{} {} using {}, content: {:?}{header_footer}",
-                        version,
-                        source_ip,
+                        ip_header_and_data.version,
+                        ip_header_and_data.source_ip,
                         source_port,
-                        destination_ip,
+                        ip_header_and_data.destination_ip,
                         destination_port,
                         flag,
-                        protocol,
+                        ip_header_and_data.protocol,
                         content,
                     );
                     successful_sender
                         .send(PacketSuccessMetric::Success(SuccessfulPacketParsed {
-                            ip_version: version,
-                            protocol: protocol,
-                            source_location: format!("{}:{}", source_ip, source_port),
+                            ip_version: ip_header_and_data.version,
+                            protocol: ip_header_and_data.protocol,
+                            source_location: format!(
+                                "{}:{}",
+                                ip_header_and_data.source_ip, source_port
+                            ),
                             destination_location: format!(
                                 "{}:{}",
-                                destination_ip, destination_port
+                                ip_header_and_data.destination_ip, destination_port
                             ),
                             content_size: content.len(),
                             tcp_flag: flag,
-                            tcp_ttl: ttl,
+                            tcp_ttl: ip_header_and_data.ttl,
                         }))
                         .unwrap();
-                } else if protocol == TransportLayerProtocol::UDP {
+                } else if ip_header_and_data.protocol == TransportLayerProtocol::UDP {
                     //// udp header
                     let source_port = convert_binary_to_decimal(&payload[20..22]);
                     let destination_port = convert_binary_to_decimal(&payload[22..24]);
@@ -410,22 +384,25 @@ fn handle_receiving_packets(interface_name: &str, successful_sender: Sender<Pack
                     let content = &payload[28..].iter().map(|c| *c as char).collect::<String>();
                     println!(
                         "IPv{}: {}:{} -> {}:{} {}, content: {:?}",
-                        version,
-                        source_ip,
+                        ip_header_and_data.version,
+                        ip_header_and_data.source_ip,
                         source_port,
-                        destination_ip,
+                        ip_header_and_data.destination_ip,
                         destination_port,
-                        protocol,
+                        ip_header_and_data.protocol,
                         content,
                     );
                     successful_sender
                         .send(PacketSuccessMetric::Success(SuccessfulPacketParsed {
-                            ip_version: version,
-                            protocol: protocol,
-                            source_location: format!("{}:{}", source_ip, source_port),
+                            ip_version: ip_header_and_data.version,
+                            protocol: ip_header_and_data.protocol,
+                            source_location: format!(
+                                "{}:{}",
+                                ip_header_and_data.source_ip, source_port
+                            ),
                             destination_location: format!(
                                 "{}:{}",
-                                destination_ip, destination_port
+                                ip_header_and_data.destination_ip, destination_port
                             ),
                             content_size: content.len(),
 
@@ -436,13 +413,13 @@ fn handle_receiving_packets(interface_name: &str, successful_sender: Sender<Pack
                 } else {
                     successful_sender
                         .send(PacketSuccessMetric::Fail(FailedPacketParsed {
-                            ip_version: version,
-                            protocol: protocol.clone(),
-                            source_location: source_ip,
-                            destination_location: destination_ip,
+                            ip_version: ip_header_and_data.version,
+                            protocol: ip_header_and_data.protocol.clone(),
+                            source_location: ip_header_and_data.source_ip.to_string(),
+                            destination_location: ip_header_and_data.destination_ip.to_string(),
                             reason_for_failure: format!(
                                 "Unhandled protocol occurred: {}",
-                                protocol
+                                ip_header_and_data.protocol
                             ),
                         }))
                         .unwrap();
@@ -454,18 +431,6 @@ fn handle_receiving_packets(interface_name: &str, successful_sender: Sender<Pack
             }
         }
     }
-}
-
-fn join_nums(nums: &[u8], sep: &str) -> String {
-    let str_nums: Vec<String> = nums.iter().map(|n| n.to_string()).collect();
-    str_nums.join(sep)
-}
-
-fn convert_binary_to_decimal(nums: &[u8]) -> usize {
-    // could also do bitwise notation but (payload[20] as usize) << 8 | (payload[21] as usize) but easy to screw up
-    let str_nums: Vec<String> = nums.iter().map(|n| format!("{:0>8b}", n)).collect();
-    let str_nums = str_nums.join("");
-    usize::from_str_radix(&str_nums, 2).unwrap()
 }
 
 fn calculate_ip_header_checksum(payload: &[u8]) -> u16 {
