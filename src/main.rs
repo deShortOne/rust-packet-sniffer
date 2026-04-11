@@ -288,7 +288,7 @@ fn handle_receiving_packets(interface_name: &str, successful_sender: Sender<Pack
                 }
 
                 if ip_header_and_data.protocol == TransportLayerProtocol::TCP {
-                    let tcp_object = tcp::map_tcp(ip_header_and_data.data);
+                    let tcp_object = tcp::map_tcp(&ip_header_and_data);
 
                     let a_number = ip_header_and_data.total_length as u32
                         - ip_header_and_data.ihl as u32

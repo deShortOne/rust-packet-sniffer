@@ -1,5 +1,7 @@
 use std::cmp::min;
 
+use crate::ip_header::IpHeader;
+
 pub struct TcpObject {
     pub source_port: u16,
     pub destination_port: u16,
@@ -14,7 +16,8 @@ pub struct TcpObject {
 }
 
 impl TcpObject {
-    pub fn new(tcp_payload: &[u8]) -> Self {
+    pub fn new(ip_header: &IpHeader) -> Self {
+        let tcp_payload = ip_header.data;
         let source_port = (tcp_payload[0] as u16) << 8 | tcp_payload[1] as u16;
         let destination_port = (tcp_payload[2] as u16) << 8 | tcp_payload[3] as u16;
         let _sequence_number = (tcp_payload[4] as u32) << 24
@@ -34,27 +37,26 @@ impl TcpObject {
         let _window_size = (tcp_payload[14] as u16) << 8 | tcp_payload[15] as u16;
         let check_sum = (tcp_payload[16] as u16) << 8 | (tcp_payload[17] as u16);
         let _urgent_pointer = (tcp_payload[18] as u16) << 8 | (tcp_payload[19] as u16);
-        // skipping tcp options
 
-        let mut content_start: usize = tcp_header_size as usize;
-        let mut content_end: usize = tcp_payload.len();
-        if content_start == content_end {
-            content_start -= 1;
-            content_end -= 1;
-        } else if tcp_payload[content_start] == 80 || tcp_payload[content_start] == 81 {
+        let mut content_start_index: usize = tcp_header_size as usize;
+        let mut content_end_index: usize = (ip_header.total_length as u32 - ip_header.ihl) as usize;
+        if content_start_index == content_end_index {
+            content_start_index -= 1;
+            content_end_index -= 1;
+        } else if tcp_payload[content_start_index] == 80 || tcp_payload[content_start_index] == 81 {
             // assuming it's plain text postgres protocol
-            let total_content_length = (tcp_payload[content_start + 1] as u32) << 24
-                | (tcp_payload[content_start + 2] as u32) << 16
-                | (tcp_payload[content_start + 3] as u32) << 8
-                | tcp_payload[content_start + 4] as u32;
+            let total_content_length = (tcp_payload[content_start_index + 1] as u32) << 24
+                | (tcp_payload[content_start_index + 2] as u32) << 16
+                | (tcp_payload[content_start_index + 3] as u32) << 8
+                | tcp_payload[content_start_index + 4] as u32;
 
-            content_start = min(content_start + 5, tcp_payload.len() - 1);
-            content_end = min(
-                content_start + total_content_length as usize,
+            content_start_index = min(content_start_index + 5, tcp_payload.len() - 1);
+            content_end_index = min(
+                content_start_index + total_content_length as usize,
                 tcp_payload.len() - 1,
             );
         }
-        let content = tcp_payload[content_start..content_end]
+        let content = tcp_payload[content_start_index..content_end_index]
             .iter()
             .map(|c| *c as char)
             .collect::<String>();
