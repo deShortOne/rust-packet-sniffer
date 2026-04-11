@@ -263,7 +263,7 @@ fn handle_receiving_packets(interface_name: &str, successful_sender: Sender<Pack
                 //// IPv4 header
                 // low delay, high throughput, reliability
                 let _tos = payload[1];
-                let _total_length = payload[3]; // payload 2 is part of but not sure what factor
+                let _total_length = usize::from((payload[2] as u16) << 8 | (payload[3] as u16)); // payload 2 is part of but not sure what factor
                 // identification: unique packet id (16 bits)
                 // flags: 3 flags, 1 bit each, reserved bit (must be 0), do not fragment flag, more fragments flag
                 let _fragment = &payload[4..6];
@@ -542,14 +542,22 @@ fn calculate_tcp_checksum(source_ip: &[u8], destination_ip: &[u8], tcp_segment: 
     !(sum as u16)
 }
 
-fn compute_checksum(data: &[u8]) -> u16 {
-    let mut sum: u32 = 0;
+fn compute_checksum(source_ip: &[u8], destination_ip: &[u8], data: &[u8], a_number: u32) -> u16 {
+    let mut sum: u32 = a_number; // supposed to be total length - ihl * 5
 
-    let mut chunks = data.chunks_exact(2);
-    for chunk in &mut chunks {
+    let chunks = source_ip.chunks_exact(2);
+    for chunk in chunks {
         sum = sum.wrapping_add((chunk[0] as u32) << 8 | (chunk[1] as u32));
     }
-    sum += 0x1a; // to be moved out!
+    let chunks = destination_ip.chunks_exact(2);
+    for chunk in chunks {
+        sum = sum.wrapping_add((chunk[0] as u32) << 8 | (chunk[1] as u32));
+    }
+
+    let chunks = data.chunks_exact(2);
+    for chunk in chunks {
+        sum = sum.wrapping_add((chunk[0] as u32) << 8 | (chunk[1] as u32));
+    }
 
     while (sum >> 16) != 0 {
         sum = (sum & 0xFFFF) + (sum >> 16);
@@ -591,11 +599,19 @@ mod tcp_checksum_test {
 
     #[test]
     fn simple_calc() {
-        let tcp_header: [u8; 24] = [
-            0xc0, 0xa8, 0x00, 0x96, 0xc0, 0xa8, 0x00, 0x72, 0xb2, 0x6e, 0xfd, 0xb8, 0x42, 0xc6,
-            0x1f, 0x88, 0x68, 0xdc, 0x69, 0x95, 0x50, 0x10, 0x01, 0xf6,
+        // this example stolen from: https://stackoverflow.com/questions/70174406/ipv4-tcp-checksum-calculation
+        let source_ip: [u8; 4] = [0xc0, 0xa8, 0x00, 0x96];
+        let destination_ip: [u8; 4] = [0xc0, 0xa8, 0x00, 0x72];
+        // let protocol_number: u8 = 6;
+        // let ihl: u8 = 20; // = 20 generated from 5 from ip header then multiplied by 4
+        let tcp_header: [u8; 16] = [
+            0xb2, 0x6e, 0xfd, 0xb8, 0x42, 0xc6, 0x1f, 0x88, 0x68, 0xdc, 0x69, 0x95, 0x50, 0x10,
+            0x01, 0xf6,
         ];
 
-        assert_eq!(compute_checksum(&tcp_header), 18078);
+        assert_eq!(
+            compute_checksum(&source_ip, &destination_ip, &tcp_header, 0x1a),
+            18078
+        );
     }
 }
