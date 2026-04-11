@@ -5,6 +5,7 @@ mod custom_ip_address;
 mod helper;
 mod ip_header;
 mod packet_event;
+mod tcp;
 mod transport_layer_protocol;
 
 use pnet::datalink::Channel::Ethernet;
@@ -12,7 +13,6 @@ use pnet::datalink::{self, NetworkInterface};
 use pnet::packet::Packet;
 use pnet::packet::ethernet::EthernetPacket;
 
-use std::cmp::min;
 use std::collections::HashMap;
 use std::env;
 use std::sync::mpsc::{self, Receiver, Sender};
@@ -288,44 +288,7 @@ fn handle_receiving_packets(interface_name: &str, successful_sender: Sender<Pack
                 }
 
                 if ip_header_and_data.protocol == TransportLayerProtocol::TCP {
-                    //// tcp header
-                    let source_port = convert_binary_to_decimal(&payload[20..22]);
-                    let destination_port = convert_binary_to_decimal(&payload[22..24]);
-                    let _sequence_number = convert_binary_to_decimal(&payload[24..28]);
-                    let _acknowledgement_number = convert_binary_to_decimal(&payload[28..32]);
-                    let data_offset_and_reserved = format!("{:x}", payload[32]);
-                    let tcp_header_size = match data_offset_and_reserved.chars().nth(0) {
-                        Some(i) => i.to_digit(10).unwrap() * 4,
-                        None => 32, // bc why not
-                    };
-                    let flag = handle_tcp_flag(&payload[33]);
-                    let _window_size = convert_binary_to_decimal(&payload[34..36]);
-                    let check_sum = (payload[36] as u16) << 8 | (payload[37] as u16);
-                    let _urgent_pointer = convert_binary_to_decimal(&payload[38..40]);
-                    // skipping tcp options
-
-                    let mut content_start: usize =
-                        ip_header_and_data.ihl as usize + tcp_header_size as usize;
-                    let mut content_end: usize = payload.len();
-                    let mut header_footer = "";
-                    // assuming it's plain text postgres protocol
-                    if content_start == content_end {
-                        content_start -= 1;
-                        content_end -= 1;
-                    } else if payload[content_start] == 80 || payload[content_start] == 81 {
-                        header_footer = "\n>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>\n";
-
-                        let total_content_length = convert_binary_to_decimal(
-                            &payload[content_start + 1..content_start + 5],
-                        );
-
-                        content_start = min(content_start + 5, payload.len() - 1);
-                        content_end = min(content_start + total_content_length, payload.len() - 1);
-                    }
-                    let content = &payload[content_start..content_end]
-                        .iter()
-                        .map(|c| *c as char)
-                        .collect::<String>();
+                    let tcp_object = tcp::map_tcp(ip_header_and_data.data);
 
                     let a_number = ip_header_and_data.total_length as u32
                         - ip_header_and_data.ihl as u32
@@ -335,28 +298,28 @@ fn handle_receiving_packets(interface_name: &str, successful_sender: Sender<Pack
                         &payload[16..20],
                         &payload[ip_header_and_data.ihl as usize..],
                         a_number,
-                        check_sum,
+                        tcp_object.check_sum,
                     ) {
                         ChecksumStatus::FullyMatched => println!("It fully matches!"),
                         ChecksumStatus::PartialMatch => println!("It partially matches!"),
                         ChecksumStatus::NoMatch(i) => {
                             eprintln!(
                                 "ERROR - packet somehow received despite checksum not matching, expect {}, but got {}",
-                                check_sum, i
+                                tcp_object.check_sum, i
                             )
                         }
                     };
 
                     println!(
-                        "{header_footer}IPv{}: {}:{} -> {}:{} {} using {}, content: {:?}{header_footer}",
+                        "IPv{}: {}:{} -> {}:{} {} using {}, content: {:?}",
                         ip_header_and_data.version,
                         ip_header_and_data.source_ip,
-                        source_port,
+                        tcp_object.source_port,
                         ip_header_and_data.destination_ip,
-                        destination_port,
-                        flag,
+                        tcp_object.destination_port,
+                        tcp_object.flag,
                         ip_header_and_data.protocol,
-                        content,
+                        tcp_object.content,
                     );
                     successful_sender
                         .send(PacketSuccessMetric::Success(SuccessfulPacketParsed {
@@ -364,14 +327,14 @@ fn handle_receiving_packets(interface_name: &str, successful_sender: Sender<Pack
                             protocol: ip_header_and_data.protocol,
                             source_location: format!(
                                 "{}:{}",
-                                ip_header_and_data.source_ip, source_port
+                                ip_header_and_data.source_ip, tcp_object.source_port
                             ),
                             destination_location: format!(
                                 "{}:{}",
-                                ip_header_and_data.destination_ip, destination_port
+                                ip_header_and_data.destination_ip, tcp_object.destination_port
                             ),
-                            content_size: content.len(),
-                            tcp_flag: flag,
+                            content_size: tcp_object.content.len(),
+                            tcp_flag: tcp_object.flag,
                             tcp_ttl: ip_header_and_data.ttl,
                         }))
                         .unwrap();
@@ -446,47 +409,6 @@ fn calculate_ip_header_checksum(payload: &[u8]) -> u16 {
         sum = (sum & 0xFFFF) + (sum >> 16);
     }
     !(sum as u16) //1s complement
-}
-
-fn handle_tcp_flag(flag: &u8) -> String {
-    let mut res: Vec<&str> = Vec::new();
-
-    // // Terminate exisitng TCP connection
-    // // If sent without completing the necessary handshake, could indicate attempt
-    // // to disrupt connection or carry out attack
-    if flag & 1 != 0 {
-        res.push("FIN");
-    }
-    // // Flag used to synchronise sequence numbers to initiate attack
-    // // large numbers of SYN packets with fake source IP address could indicate SYN flood attack
-    if flag & 2 != 0 {
-        res.push("SYN");
-    }
-    // // Flag used to reset TCP connection
-    // // Large number of RST packets could indicate DOS attack or disrupt connection
-    if flag & 4 != 0 {
-        res.push("RST");
-    }
-    // // request receiver to pass data to application as soon as its received
-    if flag & 8 != 0 {
-        res.push("PSH");
-    }
-    // // Indicate acknowledgement number field is valid
-    // // If sent on a closed port or an unexpected sequence number
-    // // could be a sign of reconnaissance or scanning activity
-    if flag & 16 != 0 {
-        res.push("ACK");
-    }
-    // // data should be processed as soon as possible
-    // // Attackers could use to hide malicious traffic or bypass security controls
-    if flag & 32 != 0 {
-        res.push("URG");
-    }
-
-    if res.len() == 0 {
-        return String::from("UNKNOWN FLAG");
-    }
-    res.join("-")
 }
 
 fn compare_tcp_checksum(
