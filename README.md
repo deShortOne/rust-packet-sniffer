@@ -35,3 +35,7 @@ IHL has a min size of 20, max size of 65535, but it didn't seem worth handling l
 
 There's also more granular things like fragment where it uses the first 3 bits to determine fragment.
 Postgres have other modes like Parse etc. See [postgresql wire protocol](https://www.postgresql.org/docs/current/protocol-message-formats.html)
+
+## TCP checksum
+There exists a thing call "partial checksums" where the tcp checksum will only be calculated from the pseduoheader and not the full thing.
+So the tcp checksum in Wireshark is not the final checksum but the partial checksum computed by the OS before the NIC finishes it. Explains why the given checksum and the computed checksum were often quite close...
