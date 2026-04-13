@@ -4,6 +4,7 @@ mod checksum_status;
 mod custom_ip_address;
 mod helper;
 mod ip_header;
+mod ip_header_v6;
 mod packet_event;
 mod tcp;
 mod transport_layer_protocol;
@@ -21,7 +22,8 @@ use std::time::{Duration, Instant};
 
 use crate::checksum_status::ChecksumStatus;
 use crate::helper::convert_binary_to_decimal;
-use crate::ip_header::IpHeader;
+use crate::ip_header::{IpHeader, IpObject, IpVersions};
+use crate::ip_header_v6::IpV6Header;
 use crate::packet_event::{
     FailedPacketParsed, NotHandledPacket, PacketSuccessMetric, SuccessfulPacketParsed,
 };
@@ -270,7 +272,28 @@ fn handle_receiving_packets(interface_name: &str, successful_sender: Sender<Pack
         match rx.next() {
             Ok(packet) => {
                 let packet = EthernetPacket::new(packet).unwrap();
-                if packet.get_ethertype() != EtherTypes::Ipv4 {
+
+                let payload = packet.payload();
+                let ip_header_and_data: IpVersions;
+                if packet.get_ethertype() == EtherTypes::Ipv4 {
+                    let ip_header_and_data_internal = match IpHeader::new(payload) {
+                        Ok(obj) => obj,
+                        Err(msg) => {
+                            eprintln!("failed to parse ip header due to {}", msg);
+                            continue;
+                        }
+                    };
+                    ip_header_and_data = IpVersions::V4(ip_header_and_data_internal);
+                } else if packet.get_ethertype() == EtherTypes::Ipv6 {
+                    let ip_header_and_data_internal = match IpV6Header::new(payload) {
+                        Ok(obj) => obj,
+                        Err(msg) => {
+                            eprintln!("failed to parse ip header due to {}", msg);
+                            continue;
+                        }
+                    };
+                    ip_header_and_data = IpVersions::V6(ip_header_and_data_internal);
+                } else {
                     successful_sender
                         .send(PacketSuccessMetric::NotHandled(NotHandledPacket {
                             not_handled_ethertype: packet.get_ethertype().to_string(),
@@ -279,25 +302,15 @@ fn handle_receiving_packets(interface_name: &str, successful_sender: Sender<Pack
                     continue;
                 }
 
-                let payload = packet.payload();
-
-                let ip_header_and_data = match IpHeader::new(payload) {
-                    Ok(obj) => obj,
-                    Err(msg) => {
-                        eprintln!("failed to parse ip header due to {}", msg);
-                        continue;
-                    }
-                };
-
                 if let TransportLayerProtocol::Unknown(protocol_number) =
-                    ip_header_and_data.protocol
+                    ip_header_and_data.get_protocol()
                 {
                     successful_sender
                         .send(PacketSuccessMetric::Fail(FailedPacketParsed {
-                            ip_version: ip_header_and_data.version,
-                            protocol: ip_header_and_data.protocol,
-                            source_location: ip_header_and_data.source_ip.to_string(),
-                            destination_location: ip_header_and_data.destination_ip.to_string(),
+                            ip_version: ip_header_and_data.get_version(),
+                            protocol: ip_header_and_data.get_protocol(),
+                            source_location: ip_header_and_data.get_source_ip(),
+                            destination_location: ip_header_and_data.get_destination_ip(),
                             reason_for_failure: format!(
                                 "Unknown protocol occurred: {}",
                                 protocol_number
@@ -307,33 +320,28 @@ fn handle_receiving_packets(interface_name: &str, successful_sender: Sender<Pack
                     continue;
                 }
 
-                let calculated_checksum = calculate_ip_header_checksum(&payload);
-                if ip_header_and_data.ip_header_checksum != calculated_checksum {
+                if let Err(reason) = ip_header_and_data.is_valid() {
                     successful_sender
                         .send(PacketSuccessMetric::Fail(FailedPacketParsed {
-                            ip_version: ip_header_and_data.version,
-                            protocol: ip_header_and_data.protocol,
-                            source_location: ip_header_and_data.source_ip.to_string(),
-                            destination_location: ip_header_and_data.destination_ip.to_string(),
-                            reason_for_failure: format!(
-                                "Checksum was not equal! Given: {}, but calculated: {}", // sucks because metrics get screwed
-                                ip_header_and_data.ip_header_checksum, calculated_checksum,
-                            ),
+                            ip_version: ip_header_and_data.get_version(),
+                            protocol: ip_header_and_data.get_protocol(),
+                            source_location: ip_header_and_data.get_source_ip(),
+                            destination_location: ip_header_and_data.get_destination_ip(),
+                            reason_for_failure: reason,
                         }))
                         .unwrap();
                     continue;
                 }
 
-                if ip_header_and_data.protocol == TransportLayerProtocol::TCP {
+                if ip_header_and_data.get_protocol() == TransportLayerProtocol::TCP {
                     let tcp_object = tcp::map_tcp(&ip_header_and_data);
 
-                    let a_number = ip_header_and_data.total_length as u32
-                        - ip_header_and_data.ihl as u32
-                        + payload[9] as u32;
+                    let a_number =
+                        ip_header_and_data.get_segment_length() as u32 + payload[9] as u32;
                     match compare_tcp_checksum(
                         &payload[12..16],
                         &payload[16..20],
-                        &payload[ip_header_and_data.ihl as usize..],
+                        ip_header_and_data.get_data(),
                         a_number,
                         tcp_object.check_sum,
                     ) {
@@ -349,33 +357,35 @@ fn handle_receiving_packets(interface_name: &str, successful_sender: Sender<Pack
 
                     println!(
                         "IPv{}: {}:{} -> {}:{} {} using {}, content: {:?}",
-                        ip_header_and_data.version,
-                        ip_header_and_data.source_ip,
+                        ip_header_and_data.get_version(),
+                        ip_header_and_data.get_source_ip(),
                         tcp_object.source_port,
-                        ip_header_and_data.destination_ip,
+                        ip_header_and_data.get_destination_ip(),
                         tcp_object.destination_port,
                         tcp_object.flag,
-                        ip_header_and_data.protocol,
+                        ip_header_and_data.get_protocol(),
                         tcp_object.content,
                     );
                     successful_sender
                         .send(PacketSuccessMetric::Success(SuccessfulPacketParsed {
-                            ip_version: ip_header_and_data.version,
-                            protocol: ip_header_and_data.protocol,
+                            ip_version: ip_header_and_data.get_version(),
+                            protocol: ip_header_and_data.get_protocol(),
                             source_location: format!(
                                 "{}:{}",
-                                ip_header_and_data.source_ip, tcp_object.source_port
+                                ip_header_and_data.get_source_ip(),
+                                tcp_object.source_port
                             ),
                             destination_location: format!(
                                 "{}:{}",
-                                ip_header_and_data.destination_ip, tcp_object.destination_port
+                                ip_header_and_data.get_destination_ip(),
+                                tcp_object.destination_port
                             ),
                             content_size: tcp_object.content.len(),
                             tcp_flag: tcp_object.flag,
-                            tcp_ttl: ip_header_and_data.ttl,
+                            tcp_ttl: ip_header_and_data.get_ttl(),
                         }))
                         .unwrap();
-                } else if ip_header_and_data.protocol == TransportLayerProtocol::UDP {
+                } else if ip_header_and_data.get_protocol() == TransportLayerProtocol::UDP {
                     //// udp header
                     let source_port = convert_binary_to_decimal(&payload[20..22]);
                     let destination_port = convert_binary_to_decimal(&payload[22..24]);
@@ -384,25 +394,27 @@ fn handle_receiving_packets(interface_name: &str, successful_sender: Sender<Pack
                     let content = &payload[28..].iter().map(|c| *c as char).collect::<String>();
                     println!(
                         "IPv{}: {}:{} -> {}:{} {}, content: {:?}",
-                        ip_header_and_data.version,
-                        ip_header_and_data.source_ip,
+                        ip_header_and_data.get_version(),
+                        ip_header_and_data.get_source_ip(),
                         source_port,
-                        ip_header_and_data.destination_ip,
+                        ip_header_and_data.get_destination_ip(),
                         destination_port,
-                        ip_header_and_data.protocol,
+                        ip_header_and_data.get_protocol(),
                         content,
                     );
                     successful_sender
                         .send(PacketSuccessMetric::Success(SuccessfulPacketParsed {
-                            ip_version: ip_header_and_data.version,
-                            protocol: ip_header_and_data.protocol,
+                            ip_version: ip_header_and_data.get_version(),
+                            protocol: ip_header_and_data.get_protocol(),
                             source_location: format!(
                                 "{}:{}",
-                                ip_header_and_data.source_ip, source_port
+                                ip_header_and_data.get_source_ip(),
+                                source_port
                             ),
                             destination_location: format!(
                                 "{}:{}",
-                                ip_header_and_data.destination_ip, destination_port
+                                ip_header_and_data.get_destination_ip(),
+                                destination_port
                             ),
                             content_size: content.len(),
 
@@ -413,13 +425,13 @@ fn handle_receiving_packets(interface_name: &str, successful_sender: Sender<Pack
                 } else {
                     successful_sender
                         .send(PacketSuccessMetric::Fail(FailedPacketParsed {
-                            ip_version: ip_header_and_data.version,
-                            protocol: ip_header_and_data.protocol.clone(),
-                            source_location: ip_header_and_data.source_ip.to_string(),
-                            destination_location: ip_header_and_data.destination_ip.to_string(),
+                            ip_version: ip_header_and_data.get_version(),
+                            protocol: ip_header_and_data.get_protocol(),
+                            source_location: ip_header_and_data.get_source_ip(),
+                            destination_location: ip_header_and_data.get_destination_ip(),
                             reason_for_failure: format!(
                                 "Unhandled protocol occurred: {}",
-                                ip_header_and_data.protocol
+                                ip_header_and_data.get_protocol()
                             ),
                         }))
                         .unwrap();
@@ -431,21 +443,6 @@ fn handle_receiving_packets(interface_name: &str, successful_sender: Sender<Pack
             }
         }
     }
-}
-
-fn calculate_ip_header_checksum(payload: &[u8]) -> u16 {
-    let mut sum = 0u32;
-    for i in 0..10 {
-        if i == 5 {
-            continue; // skip checksum number
-        }
-        sum = sum.wrapping_add((payload[i * 2] as u32) << 8 | (payload[i * 2 + 1] as u32));
-    }
-    // One odd bit (carry) - could do during loop instead
-    while sum >> 16 != 0 {
-        sum = (sum & 0xFFFF) + (sum >> 16);
-    }
-    !(sum as u16) //1s complement
 }
 
 fn compare_tcp_checksum(

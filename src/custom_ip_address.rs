@@ -20,3 +20,21 @@ impl fmt::Display for IpV4Address {
         write!(f, "{}", self.address)
     }
 }
+
+pub struct IpV6Address {
+    address: String,
+}
+
+impl IpV6Address {
+    pub fn new(address: &[u8]) -> Self {
+        Self {
+            address: join_nums(address, ":"),
+        }
+    }
+}
+
+impl fmt::Display for IpV6Address {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{}", self.address)
+    }
+}

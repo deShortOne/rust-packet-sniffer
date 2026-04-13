@@ -1,6 +1,6 @@
 use std::cmp::min;
 
-use crate::ip_header::IpHeader;
+use crate::ip_header::{IpObject, IpVersions};
 
 pub struct TcpObject {
     pub source_port: u16,
@@ -16,8 +16,8 @@ pub struct TcpObject {
 }
 
 impl TcpObject {
-    pub fn new(ip_header: &IpHeader) -> Self {
-        let tcp_payload = ip_header.data;
+    pub fn new(ip_header: &IpVersions) -> Self {
+        let tcp_payload = ip_header.get_data();
         let source_port = (tcp_payload[0] as u16) << 8 | tcp_payload[1] as u16;
         let destination_port = (tcp_payload[2] as u16) << 8 | tcp_payload[3] as u16;
         let _sequence_number = (tcp_payload[4] as u32) << 24
@@ -39,7 +39,7 @@ impl TcpObject {
         let _urgent_pointer = (tcp_payload[18] as u16) << 8 | (tcp_payload[19] as u16);
 
         let mut content_start_index: usize = tcp_header_size as usize;
-        let mut content_end_index: usize = (ip_header.total_length as u32 - ip_header.ihl) as usize;
+        let mut content_end_index: usize = ip_header.get_segment_length();
         if content_start_index == content_end_index {
             content_start_index -= 1;
             content_end_index -= 1;
