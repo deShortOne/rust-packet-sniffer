@@ -336,15 +336,7 @@ fn handle_receiving_packets(interface_name: &str, successful_sender: Sender<Pack
                 if ip_header_and_data.get_protocol() == TransportLayerProtocol::TCP {
                     let tcp_object = tcp::map_tcp(&ip_header_and_data);
 
-                    let a_number =
-                        ip_header_and_data.get_segment_length() as u32 + payload[9] as u32;
-                    match compare_tcp_checksum(
-                        &payload[12..16],
-                        &payload[16..20],
-                        ip_header_and_data.get_data(),
-                        a_number,
-                        tcp_object.check_sum,
-                    ) {
+                    match tcp_object.is_valid() {
                         ChecksumStatus::FullyMatched => println!("It fully matches!"),
                         ChecksumStatus::PartialMatch => println!("It partially matches!"),
                         ChecksumStatus::NoMatch(i) => {
@@ -353,7 +345,7 @@ fn handle_receiving_packets(interface_name: &str, successful_sender: Sender<Pack
                                 tcp_object.check_sum, i
                             )
                         }
-                    };
+                    }
 
                     println!(
                         "IPv{}: {}:{} -> {}:{} {} using {}, content: {:?}",
@@ -442,101 +434,5 @@ fn handle_receiving_packets(interface_name: &str, successful_sender: Sender<Pack
                 panic!("An error occurred while reading: {}", e);
             }
         }
-    }
-}
-
-fn compare_tcp_checksum(
-    source_ip: &[u8],
-    destination_ip: &[u8],
-    data: &[u8],
-    a_number: u32,
-    given_checksum: u16,
-) -> ChecksumStatus {
-    let mut sum: u32 = a_number; // supposed to be total length - ihl * 5
-
-    let chunks = source_ip.chunks_exact(2);
-    for chunk in chunks {
-        sum = sum.wrapping_add((chunk[0] as u32) << 8 | (chunk[1] as u32));
-    }
-    let chunks = destination_ip.chunks_exact(2);
-    for chunk in chunks {
-        sum = sum.wrapping_add((chunk[0] as u32) << 8 | (chunk[1] as u32));
-    }
-    while (sum >> 16) != 0 {
-        sum = (sum & 0xFFFF) + (sum >> 16);
-    }
-    if sum as u16 == given_checksum {
-        return ChecksumStatus::PartialMatch;
-    }
-
-    let chunks = data.chunks_exact(2);
-    for chunk in chunks {
-        sum = sum.wrapping_add((chunk[0] as u32) << 8 | (chunk[1] as u32));
-    }
-
-    while (sum >> 16) != 0 {
-        sum = (sum & 0xFFFF) + (sum >> 16);
-    }
-
-    match !(sum as u16) {
-        final_checksum if final_checksum == given_checksum => ChecksumStatus::FullyMatched,
-        final_checksum => ChecksumStatus::NoMatch(final_checksum),
-    }
-}
-
-#[cfg(test)]
-mod tcp_checksum_test {
-    use super::*;
-
-    #[test]
-    fn checksum_fully_matches() {
-        // this example stolen from: https://stackoverflow.com/questions/70174406/ipv4-tcp-checksum-calculation
-        let source_ip: [u8; 4] = [0xc0, 0xa8, 0x00, 0x96];
-        let destination_ip: [u8; 4] = [0xc0, 0xa8, 0x00, 0x72];
-        // let protocol_number: u8 = 6;
-        // let ihl: u8 = 20; // = 20 generated from 5 from ip header then multiplied by 4
-        let tcp_header: [u8; 16] = [
-            0xb2, 0x6e, 0xfd, 0xb8, 0x42, 0xc6, 0x1f, 0x88, 0x68, 0xdc, 0x69, 0x95, 0x50, 0x10,
-            0x01, 0xf6,
-        ];
-
-        assert_eq!(
-            compare_tcp_checksum(&source_ip, &destination_ip, &tcp_header, 0x1a, 18078),
-            ChecksumStatus::FullyMatched
-        );
-    }
-
-    #[test]
-    fn checksum_partially_matches() {
-        let source_ip: [u8; 4] = [0xc0, 0xa8, 0x0, 0x14];
-        let destination_ip: [u8; 4] = [0xa2, 0x9f, 0x86, 0xea];
-        // let protocol_number: u8 = 6;
-        // let ihl: u8 = 20; // = 20 generated from 5 from ip header then multiplied by 4
-        let tcp_header: [u8; 16] = [
-            0xe5, 0xa4, 0x1, 0xbb, 0xbc, 0x66, 0x51, 0x17, 0xb0, 0xe4, 0x8, 0xa9, 0x50, 0x10, 0x20,
-            0x54,
-        ];
-
-        assert_eq!(
-            compare_tcp_checksum(&source_ip, &destination_ip, &tcp_header, 0x1a, 0xea60),
-            ChecksumStatus::PartialMatch
-        );
-    }
-
-    #[test]
-    fn checksum_doesnt_match() {
-        let source_ip: [u8; 4] = [0xc0, 0xa8, 0x0, 0x14];
-        let destination_ip: [u8; 4] = [0xa2, 0x9f, 0x86, 0xea];
-        // let protocol_number: u8 = 6;
-        // let ihl: u8 = 20; // = 20 generated from 5 from ip header then multiplied by 4
-        let tcp_header: [u8; 16] = [
-            0xe5, 0xa4, 0x1, 0xbb, 0xbc, 0x66, 0x51, 0x17, 0xb0, 0xe4, 0x8, 0xa9, 0x50, 0x10, 0x20,
-            0x54,
-        ];
-
-        assert_eq!(
-            compare_tcp_checksum(&source_ip, &destination_ip, &tcp_header, 0x1a, 0x0),
-            ChecksumStatus::NoMatch(0xf6ce)
-        );
     }
 }

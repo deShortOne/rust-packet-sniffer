@@ -1,4 +1,8 @@
-use crate::{TransportLayerProtocol, custom_ip_address::IpV4Address, ip_header_v6::IpV6Header};
+use crate::{
+    TransportLayerProtocol,
+    custom_ip_address::{IpAddress, IpV4Address},
+    ip_header_v6::IpV6Header,
+};
 
 pub enum IpVersions<'a> {
     V4(IpHeader<'a>),
@@ -42,10 +46,22 @@ impl<'a> IpObject for IpVersions<'a> {
             IpVersions::V6(i) => i.get_source_ip(),
         }
     }
+    fn get_source_ip_raw(&self) -> &[u8] {
+        match self {
+            IpVersions::V4(i) => i.get_source_ip_raw(),
+            IpVersions::V6(i) => i.get_source_ip_raw(),
+        }
+    }
     fn get_destination_ip(&self) -> String {
         match self {
             IpVersions::V4(i) => i.get_destination_ip(),
             IpVersions::V6(i) => i.get_destination_ip(),
+        }
+    }
+    fn get_destination_ip_raw(&self) -> &[u8] {
+        match self {
+            IpVersions::V4(i) => i.get_destination_ip_raw(),
+            IpVersions::V6(i) => i.get_destination_ip_raw(),
         }
     }
     fn get_ttl(&self) -> u8 {
@@ -63,7 +79,9 @@ pub trait IpObject {
     fn get_protocol(&self) -> TransportLayerProtocol;
     fn get_version(&self) -> u32;
     fn get_source_ip(&self) -> String;
+    fn get_source_ip_raw(&self) -> &[u8];
     fn get_destination_ip(&self) -> String;
+    fn get_destination_ip_raw(&self) -> &[u8];
     fn get_ttl(&self) -> u8;
 }
 
@@ -77,8 +95,8 @@ pub struct IpHeader<'a> {
     pub ttl: u8,
     pub protocol: TransportLayerProtocol,
     pub ip_header_checksum: u16,
-    pub source_ip: IpV4Address,
-    pub destination_ip: IpV4Address,
+    pub source_ip: IpV4Address<'a>,
+    pub destination_ip: IpV4Address<'a>,
     pub _options: &'a [u8],
     pub data: &'a [u8],
 
@@ -185,8 +203,16 @@ impl<'a> IpObject for IpHeader<'a> {
         self.source_ip.to_string()
     }
 
+    fn get_source_ip_raw(&self) -> &[u8] {
+        self.source_ip.get_raw_bytes()
+    }
+
     fn get_destination_ip(&self) -> String {
         self.destination_ip.to_string()
+    }
+
+    fn get_destination_ip_raw(&self) -> &[u8] {
+        self.destination_ip.get_raw_bytes()
     }
 
     fn get_ttl(&self) -> u8 {

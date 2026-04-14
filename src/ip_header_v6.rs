@@ -1,5 +1,6 @@
 use crate::{
-    custom_ip_address::IpV6Address, ip_header::IpObject,
+    custom_ip_address::{IpAddress, IpV6Address},
+    ip_header::IpObject,
     transport_layer_protocol::TransportLayerProtocol,
 };
 
@@ -10,8 +11,8 @@ pub struct IpV6Header<'a> {
     pub payload_length: u16,
     pub next_header: TransportLayerProtocol,
     pub hop_limit: u8,
-    pub source_ip: IpV6Address,
-    pub destination_ip: IpV6Address,
+    pub source_ip: IpV6Address<'a>,
+    pub destination_ip: IpV6Address<'a>,
     pub data: &'a [u8],
 }
 
@@ -23,8 +24,8 @@ impl<'a> IpV6Header<'a> {
         let traffic_class = 0x0F & version_and_first_half_of_traffic
             | second_half_of_traffic_class_and_first_bit_of_flow_label >> 4;
         let last_bit_of_flow_label = (payload[2] as u32) << 8 | payload[3] as u32;
-        let flow_label = (0x0F & second_half_of_traffic_class_and_first_bit_of_flow_label << 16)
-            as u32
+        let flow_label = (0x0F & second_half_of_traffic_class_and_first_bit_of_flow_label as u32)
+            << 16
             | last_bit_of_flow_label;
         let payload_length = (payload[4] as u16) << 8 | payload[5] as u16;
         let next_header = match payload[6] {
@@ -77,8 +78,16 @@ impl<'a> IpObject for IpV6Header<'a> {
         self.source_ip.to_string()
     }
 
+    fn get_source_ip_raw(&self) -> &[u8] {
+        self.source_ip.get_raw_bytes()
+    }
+
     fn get_destination_ip(&self) -> String {
         self.destination_ip.to_string()
+    }
+
+    fn get_destination_ip_raw(&self) -> &[u8] {
+        self.destination_ip.get_raw_bytes()
     }
 
     fn get_ttl(&self) -> u8 {
