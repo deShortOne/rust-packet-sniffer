@@ -334,6 +334,9 @@ fn handle_receiving_packets(interface_name: &str, successful_sender: Sender<Pack
                 }
 
                 if ip_header_and_data.get_protocol() == TransportLayerProtocol::TCP {
+                    if true {
+                        continue;
+                    }
                     let tcp_object = match tcp::map_tcp(&ip_header_and_data) {
                         Ok(i) => i,
                         Err(reason) => {
@@ -395,21 +398,33 @@ fn handle_receiving_packets(interface_name: &str, successful_sender: Sender<Pack
                         }))
                         .unwrap();
                 } else if ip_header_and_data.get_protocol() == TransportLayerProtocol::UDP {
-                    //// udp header
-                    let source_port = convert_binary_to_decimal(&payload[20..22]);
-                    let destination_port = convert_binary_to_decimal(&payload[22..24]);
-                    let _length = convert_binary_to_decimal(&payload[24..26]);
-                    let _check_sum = convert_binary_to_decimal(&payload[26..28]); // which can be optional
-                    let content = &payload[28..].iter().map(|c| *c as char).collect::<String>();
+                    let udp_object = match tcp::map_udp(&ip_header_and_data) {
+                        Ok(i) => i,
+                        Err(reason) => {
+                            successful_sender
+                                .send(PacketSuccessMetric::Fail(FailedPacketParsed {
+                                    ip_version: ip_header_and_data.get_version(),
+                                    protocol: ip_header_and_data.get_protocol(),
+                                    source_location: ip_header_and_data.get_source_ip(),
+                                    destination_location: ip_header_and_data.get_destination_ip(),
+                                    reason_for_failure: format!(
+                                        "Unable to create udp objecte due to {}",
+                                        reason
+                                    ),
+                                }))
+                                .unwrap();
+                            continue;
+                        }
+                    };
                     println!(
                         "IPv{}: {}:{} -> {}:{} {}, content: {:?}",
                         ip_header_and_data.get_version(),
                         ip_header_and_data.get_source_ip(),
-                        source_port,
+                        udp_object.source_port,
                         ip_header_and_data.get_destination_ip(),
-                        destination_port,
+                        udp_object.destination_port,
                         ip_header_and_data.get_protocol(),
-                        content,
+                        udp_object.content,
                     );
                     successful_sender
                         .send(PacketSuccessMetric::Success(SuccessfulPacketParsed {
@@ -418,14 +433,14 @@ fn handle_receiving_packets(interface_name: &str, successful_sender: Sender<Pack
                             source_location: format!(
                                 "{}:{}",
                                 ip_header_and_data.get_source_ip(),
-                                source_port
+                                udp_object.source_port
                             ),
                             destination_location: format!(
                                 "{}:{}",
                                 ip_header_and_data.get_destination_ip(),
-                                destination_port
+                                udp_object.destination_port
                             ),
-                            content_size: content.len(),
+                            content_size: udp_object.content.len(),
 
                             tcp_flag: String::new(),
                             tcp_ttl: 0,
