@@ -21,7 +21,6 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use crate::checksum_status::ChecksumStatus;
-use crate::helper::convert_binary_to_decimal;
 use crate::ip_header::{IpHeader, IpObject, IpVersions};
 use crate::ip_header_v6::IpV6Header;
 use crate::packet_event::{
@@ -334,9 +333,6 @@ fn handle_receiving_packets(interface_name: &str, successful_sender: Sender<Pack
                 }
 
                 if ip_header_and_data.get_protocol() == TransportLayerProtocol::TCP {
-                    if true {
-                        continue;
-                    }
                     let tcp_object = match tcp::map_tcp(&ip_header_and_data) {
                         Ok(i) => i,
                         Err(reason) => {
@@ -416,6 +412,27 @@ fn handle_receiving_packets(interface_name: &str, successful_sender: Sender<Pack
                             continue;
                         }
                     };
+
+                    match udp_object.is_valid() {
+                        ChecksumStatus::FullyMatched => println!("It fully matches!"),
+                        ChecksumStatus::PartialMatch => println!("It partially matches!"),
+                        ChecksumStatus::NoMatch(i) => {
+                            if udp_object.check_sum == 0 {
+                                // http://www.faqs.org/rfcs/rfc768.html "An all zero transmitted checksum value means that
+                                // the transmitter generated no checksum (for debugging or for higher level protocols that don't care)."
+                                println!(
+                                    "Packet checksum is 0 so something is being lazy for reasons, but should be {}",
+                                    i
+                                )
+                            } else {
+                                eprintln!(
+                                    "ERROR - packet somehow received despite checksum not matching, expect {}, but got {}",
+                                    udp_object.check_sum, i
+                                )
+                            }
+                        }
+                    }
+
                     println!(
                         "IPv{}: {}:{} -> {}:{} {}, content: {:?}",
                         ip_header_and_data.get_version(),
