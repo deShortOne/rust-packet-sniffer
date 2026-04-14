@@ -334,7 +334,24 @@ fn handle_receiving_packets(interface_name: &str, successful_sender: Sender<Pack
                 }
 
                 if ip_header_and_data.get_protocol() == TransportLayerProtocol::TCP {
-                    let tcp_object = tcp::map_tcp(&ip_header_and_data);
+                    let tcp_object = match tcp::map_tcp(&ip_header_and_data) {
+                        Ok(i) => i,
+                        Err(reason) => {
+                            successful_sender
+                                .send(PacketSuccessMetric::Fail(FailedPacketParsed {
+                                    ip_version: ip_header_and_data.get_version(),
+                                    protocol: ip_header_and_data.get_protocol(),
+                                    source_location: ip_header_and_data.get_source_ip(),
+                                    destination_location: ip_header_and_data.get_destination_ip(),
+                                    reason_for_failure: format!(
+                                        "Unable to create tcp objecte due to {}",
+                                        reason
+                                    ),
+                                }))
+                                .unwrap();
+                            continue;
+                        }
+                    };
 
                     match tcp_object.is_valid() {
                         ChecksumStatus::FullyMatched => println!("It fully matches!"),

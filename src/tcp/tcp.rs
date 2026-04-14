@@ -21,7 +21,7 @@ pub struct TcpObject<'a> {
 }
 
 impl<'a> TcpObject<'a> {
-    pub fn new(ip_header: &'a IpVersions) -> Self {
+    pub fn new(ip_header: &'a IpVersions) -> Result<Self, String> {
         let tcp_payload = ip_header.get_data();
         let source_port = (tcp_payload[0] as u16) << 8 | tcp_payload[1] as u16;
         let destination_port = (tcp_payload[2] as u16) << 8 | tcp_payload[3] as u16;
@@ -38,13 +38,15 @@ impl<'a> TcpObject<'a> {
             Some(i) => {
                 4 * match i.to_digit(10) {
                     Some(i) => i,
-                    None => panic!(
-                        "\n\n\nCharacter that failed: {:?}\n\n\n\n",
-                        data_offset_and_reserved.chars().nth(0)
-                    ),
+                    None => {
+                        return Err(format!(
+                            "Failed to create tcp object as unable to deciper tcp header size due to the character: {:?}",
+                            data_offset_and_reserved.chars().nth(0)
+                        ));
+                    }
                 }
             }
-            None => 32, // bc why not
+            None => return Err("tcp header size was not present".to_string()),
         };
         let flag = handle_tcp_flag(&tcp_payload[13]);
         let _window_size = (tcp_payload[14] as u16) << 8 | tcp_payload[15] as u16;
@@ -74,7 +76,7 @@ impl<'a> TcpObject<'a> {
             .map(|c| *c as char)
             .collect::<String>();
 
-        Self {
+        Ok(Self {
             source_port,
             destination_port,
             _sequence_number,
@@ -87,7 +89,7 @@ impl<'a> TcpObject<'a> {
             content,
 
             based_off: ip_header,
-        }
+        })
     }
 
     pub fn is_valid(&self) -> ChecksumStatus {
