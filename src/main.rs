@@ -5,6 +5,7 @@ mod cli;
 mod custom_ip_address;
 mod helper;
 mod ip_header;
+mod ip_header_test;
 mod ip_header_v6;
 mod packet_event;
 mod tcp;

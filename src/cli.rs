@@ -1,9 +1,7 @@
 use clap::Parser;
 
 use crate::{
-    ip_header::{IpObject, IpVersions},
-    tcp::PacketBodyObject,
-    transport_layer_protocol::TransportLayerProtocol,
+    ip_header::IpObject, tcp::PacketBodyObject, transport_layer_protocol::TransportLayerProtocol,
 };
 
 /// Simple program to greet a person
@@ -107,10 +105,10 @@ impl TcpObjectValidation {
         })
     }
 
-    pub fn should_packet_be_processed<'a, T: PacketBodyObject>(
+    pub fn should_packet_be_processed<T: IpObject, U: PacketBodyObject>(
         &self,
-        ip_header: &IpVersions<'a>,
-        packet: &T,
+        ip_header: &T,
+        packet: &U,
     ) -> bool {
         let mut should_continue = self.protocols.is_empty();
         for protocol in &self.protocols {
@@ -163,44 +161,536 @@ impl TcpObjectValidation {
     }
 }
 
-// #[cfg(test)]
-// mod source_port_test {
-//     use crate::{custom_ip_address::IpV4Address, ip_header::IpHeader};
+#[cfg(test)]
+mod source_port_test {
+    use crate::ip_header_test::IpHeaderTestObject;
+    use crate::tcp::fake::FakePacketBody;
 
-//     use super::*;
+    use super::*;
 
-//     #[test]
-//     fn with_a_singular_source_port() {
-//         let validator = TcpObjectValidation::internal_new(Args {
-//             interface: String::new(),
-//             protocol: Some(Vec::new()),
-//             source_port_range: Some(Vec::new()),
-//             source_port: Some(vec!["1024".to_string()]),
-//             destination_port_range: Some(Vec::new()),
-//             destination_port: Some(Vec::new()),
-//         })
-//         .unwrap();
+    #[test]
+    fn with_a_singular_source_port() {
+        let validator = TcpObjectValidation::internal_new(Args {
+            interface: String::new(),
+            protocol: Some(Vec::new()),
+            source_port_range: Some(Vec::new()),
+            source_port: Some(vec!["1024".to_string()]),
+            destination_port_range: Some(Vec::new()),
+            destination_port: Some(Vec::new()),
+        })
+        .unwrap();
 
-//         assert_eq!(
-//             validator.should_packet_be_processed(
-//                 &IpVersions::V4(IpHeader {
-//                     version: -1,
-//                     ihl: -1,
-//                     _tos: -1,
-//                     total_length: -1,
-//                     _fragment: &[u8; 0],
-//                     _fragment_offset: &[u8; 0],
-//                     _options: &[u8; 0],
-//                     data: nil,
-//                     destination_ip: IpV4Address::new(&[u8; 0]),
-//                     ip_header_checksum: -1,
-//                     protocol: TransportLayerProtocol::TCP,
-//                     source_ip: IpV4Address::new(&[u8; 0]),
-//                     ttl: -1,
-//                 }),
-//                 packet
-//             ),
-//             true
-//         );
-//     }
-// }
+        assert_eq!(
+            validator.should_packet_be_processed(
+                &IpHeaderTestObject::new(TransportLayerProtocol::Unknown(1)),
+                &FakePacketBody::new(1024, 3000)
+            ),
+            true
+        );
+
+        assert_eq!(
+            validator.should_packet_be_processed(
+                &IpHeaderTestObject::new(TransportLayerProtocol::Unknown(1)),
+                &FakePacketBody::new(2024, 3000)
+            ),
+            false
+        );
+    }
+
+    #[test]
+    fn with_multiple_singular_source_ports() {
+        let validator = TcpObjectValidation::internal_new(Args {
+            interface: String::new(),
+            protocol: Some(Vec::new()),
+            source_port_range: Some(Vec::new()),
+            source_port: Some(vec![
+                "1024".to_string(),
+                "1025".to_string(),
+                "1090".to_string(),
+            ]),
+            destination_port_range: Some(Vec::new()),
+            destination_port: Some(Vec::new()),
+        })
+        .unwrap();
+
+        assert_eq!(
+            validator.should_packet_be_processed(
+                &IpHeaderTestObject::new(TransportLayerProtocol::Unknown(1)),
+                &FakePacketBody::new(1024, 3000)
+            ),
+            true
+        );
+        assert_eq!(
+            validator.should_packet_be_processed(
+                &IpHeaderTestObject::new(TransportLayerProtocol::Unknown(1)),
+                &FakePacketBody::new(1025, 3000)
+            ),
+            true
+        );
+        assert_eq!(
+            validator.should_packet_be_processed(
+                &IpHeaderTestObject::new(TransportLayerProtocol::Unknown(1)),
+                &FakePacketBody::new(1090, 3000)
+            ),
+            true
+        );
+        assert_eq!(
+            validator.should_packet_be_processed(
+                &IpHeaderTestObject::new(TransportLayerProtocol::Unknown(1)),
+                &FakePacketBody::new(1080, 3000)
+            ),
+            false
+        );
+    }
+
+    #[test]
+    fn with_a_ranged_source_port() {
+        let validator = TcpObjectValidation::internal_new(Args {
+            interface: String::new(),
+            protocol: Some(Vec::new()),
+            source_port_range: Some(vec!["1024-1090".to_string()]),
+            source_port: Some(Vec::new()),
+            destination_port_range: Some(Vec::new()),
+            destination_port: Some(Vec::new()),
+        })
+        .unwrap();
+
+        assert_eq!(
+            validator.should_packet_be_processed(
+                &IpHeaderTestObject::new(TransportLayerProtocol::Unknown(1)),
+                &FakePacketBody::new(1024, 3000)
+            ),
+            true
+        );
+        assert_eq!(
+            validator.should_packet_be_processed(
+                &IpHeaderTestObject::new(TransportLayerProtocol::Unknown(1)),
+                &FakePacketBody::new(1080, 3000)
+            ),
+            true
+        );
+        assert_eq!(
+            validator.should_packet_be_processed(
+                &IpHeaderTestObject::new(TransportLayerProtocol::Unknown(1)),
+                &FakePacketBody::new(1090, 3000)
+            ),
+            true
+        );
+
+        assert_eq!(
+            validator.should_packet_be_processed(
+                &IpHeaderTestObject::new(TransportLayerProtocol::Unknown(1)),
+                &FakePacketBody::new(2024, 3000)
+            ),
+            false
+        );
+    }
+
+    #[test]
+    fn with_multiple_ranged_source_port() {
+        let validator = TcpObjectValidation::internal_new(Args {
+            interface: String::new(),
+            protocol: Some(Vec::new()),
+            source_port_range: Some(vec!["1024-1090".to_string(), "2024-2090".to_string()]),
+            source_port: Some(Vec::new()),
+            destination_port_range: Some(Vec::new()),
+            destination_port: Some(Vec::new()),
+        })
+        .unwrap();
+
+        assert_eq!(
+            validator.should_packet_be_processed(
+                &IpHeaderTestObject::new(TransportLayerProtocol::Unknown(1)),
+                &FakePacketBody::new(1024, 3000)
+            ),
+            true
+        );
+        assert_eq!(
+            validator.should_packet_be_processed(
+                &IpHeaderTestObject::new(TransportLayerProtocol::Unknown(1)),
+                &FakePacketBody::new(1080, 3000)
+            ),
+            true
+        );
+        assert_eq!(
+            validator.should_packet_be_processed(
+                &IpHeaderTestObject::new(TransportLayerProtocol::Unknown(1)),
+                &FakePacketBody::new(1090, 3000)
+            ),
+            true
+        );
+        assert_eq!(
+            validator.should_packet_be_processed(
+                &IpHeaderTestObject::new(TransportLayerProtocol::Unknown(1)),
+                &FakePacketBody::new(2023, 3000)
+            ),
+            false
+        );
+
+        assert_eq!(
+            validator.should_packet_be_processed(
+                &IpHeaderTestObject::new(TransportLayerProtocol::Unknown(1)),
+                &FakePacketBody::new(2024, 3000)
+            ),
+            true
+        );
+        assert_eq!(
+            validator.should_packet_be_processed(
+                &IpHeaderTestObject::new(TransportLayerProtocol::Unknown(1)),
+                &FakePacketBody::new(2080, 3000)
+            ),
+            true
+        );
+        assert_eq!(
+            validator.should_packet_be_processed(
+                &IpHeaderTestObject::new(TransportLayerProtocol::Unknown(1)),
+                &FakePacketBody::new(2090, 3000)
+            ),
+            true
+        );
+        assert_eq!(
+            validator.should_packet_be_processed(
+                &IpHeaderTestObject::new(TransportLayerProtocol::Unknown(1)),
+                &FakePacketBody::new(3023, 3000)
+            ),
+            false
+        );
+    }
+
+    #[test]
+    fn with_multiple_ranged_source_port_and_multiple_singular_ports() {
+        let validator = TcpObjectValidation::internal_new(Args {
+            interface: String::new(),
+            protocol: Some(Vec::new()),
+            source_port_range: Some(vec!["1024-1090".to_string(), "2024-2090".to_string()]),
+            source_port: Some(vec!["2000".to_string()]),
+            destination_port_range: Some(Vec::new()),
+            destination_port: Some(Vec::new()),
+        })
+        .unwrap();
+
+        assert_eq!(
+            validator.should_packet_be_processed(
+                &IpHeaderTestObject::new(TransportLayerProtocol::Unknown(1)),
+                &FakePacketBody::new(2000, 3000)
+            ),
+            true
+        );
+        assert_eq!(
+            validator.should_packet_be_processed(
+                &IpHeaderTestObject::new(TransportLayerProtocol::Unknown(1)),
+                &FakePacketBody::new(1999, 3000)
+            ),
+            false
+        );
+        assert_eq!(
+            validator.should_packet_be_processed(
+                &IpHeaderTestObject::new(TransportLayerProtocol::Unknown(1)),
+                &FakePacketBody::new(2001, 3000)
+            ),
+            false
+        );
+
+        assert_eq!(
+            validator.should_packet_be_processed(
+                &IpHeaderTestObject::new(TransportLayerProtocol::Unknown(1)),
+                &FakePacketBody::new(1024, 3000)
+            ),
+            true
+        );
+        assert_eq!(
+            validator.should_packet_be_processed(
+                &IpHeaderTestObject::new(TransportLayerProtocol::Unknown(1)),
+                &FakePacketBody::new(1080, 3000)
+            ),
+            true
+        );
+        assert_eq!(
+            validator.should_packet_be_processed(
+                &IpHeaderTestObject::new(TransportLayerProtocol::Unknown(1)),
+                &FakePacketBody::new(1090, 3000)
+            ),
+            true
+        );
+        assert_eq!(
+            validator.should_packet_be_processed(
+                &IpHeaderTestObject::new(TransportLayerProtocol::Unknown(1)),
+                &FakePacketBody::new(2023, 3000)
+            ),
+            false
+        );
+
+        assert_eq!(
+            validator.should_packet_be_processed(
+                &IpHeaderTestObject::new(TransportLayerProtocol::Unknown(1)),
+                &FakePacketBody::new(2024, 3000)
+            ),
+            true
+        );
+        assert_eq!(
+            validator.should_packet_be_processed(
+                &IpHeaderTestObject::new(TransportLayerProtocol::Unknown(1)),
+                &FakePacketBody::new(2080, 3000)
+            ),
+            true
+        );
+        assert_eq!(
+            validator.should_packet_be_processed(
+                &IpHeaderTestObject::new(TransportLayerProtocol::Unknown(1)),
+                &FakePacketBody::new(2090, 3000)
+            ),
+            true
+        );
+        assert_eq!(
+            validator.should_packet_be_processed(
+                &IpHeaderTestObject::new(TransportLayerProtocol::Unknown(1)),
+                &FakePacketBody::new(3023, 3000)
+            ),
+            false
+        );
+    }
+}
+
+#[cfg(test)]
+mod destination_port_test {
+    use crate::ip_header_test::IpHeaderTestObject;
+    use crate::tcp::fake::FakePacketBody;
+
+    use super::*;
+
+    #[test]
+    fn with_multiple_ranged_destination_port_and_multiple_destination_ports() {
+        let validator = TcpObjectValidation::internal_new(Args {
+            interface: String::new(),
+            protocol: Some(Vec::new()),
+            source_port_range: Some(Vec::new()),
+            source_port: Some(Vec::new()),
+            destination_port_range: Some(vec!["1024-1090".to_string(), "2024-2090".to_string()]),
+            destination_port: Some(vec!["2000".to_string()]),
+        })
+        .unwrap();
+
+        assert_eq!(
+            validator.should_packet_be_processed(
+                &IpHeaderTestObject::new(TransportLayerProtocol::Unknown(1)),
+                &FakePacketBody::new(3000, 2000)
+            ),
+            true
+        );
+        assert_eq!(
+            validator.should_packet_be_processed(
+                &IpHeaderTestObject::new(TransportLayerProtocol::Unknown(1)),
+                &FakePacketBody::new(3000, 1999)
+            ),
+            false
+        );
+        assert_eq!(
+            validator.should_packet_be_processed(
+                &IpHeaderTestObject::new(TransportLayerProtocol::Unknown(1)),
+                &FakePacketBody::new(3000, 2001)
+            ),
+            false
+        );
+
+        assert_eq!(
+            validator.should_packet_be_processed(
+                &IpHeaderTestObject::new(TransportLayerProtocol::Unknown(1)),
+                &FakePacketBody::new(3000, 1024)
+            ),
+            true
+        );
+        assert_eq!(
+            validator.should_packet_be_processed(
+                &IpHeaderTestObject::new(TransportLayerProtocol::Unknown(1)),
+                &FakePacketBody::new(3000, 1080)
+            ),
+            true
+        );
+        assert_eq!(
+            validator.should_packet_be_processed(
+                &IpHeaderTestObject::new(TransportLayerProtocol::Unknown(1)),
+                &FakePacketBody::new(3000, 1090)
+            ),
+            true
+        );
+        assert_eq!(
+            validator.should_packet_be_processed(
+                &IpHeaderTestObject::new(TransportLayerProtocol::Unknown(1)),
+                &FakePacketBody::new(3000, 2023)
+            ),
+            false
+        );
+
+        assert_eq!(
+            validator.should_packet_be_processed(
+                &IpHeaderTestObject::new(TransportLayerProtocol::Unknown(1)),
+                &FakePacketBody::new(3000, 2024)
+            ),
+            true
+        );
+        assert_eq!(
+            validator.should_packet_be_processed(
+                &IpHeaderTestObject::new(TransportLayerProtocol::Unknown(1)),
+                &FakePacketBody::new(3000, 2080)
+            ),
+            true
+        );
+        assert_eq!(
+            validator.should_packet_be_processed(
+                &IpHeaderTestObject::new(TransportLayerProtocol::Unknown(1)),
+                &FakePacketBody::new(3000, 2090)
+            ),
+            true
+        );
+        assert_eq!(
+            validator.should_packet_be_processed(
+                &IpHeaderTestObject::new(TransportLayerProtocol::Unknown(1)),
+                &FakePacketBody::new(3000, 3023)
+            ),
+            false
+        );
+    }
+}
+
+#[cfg(test)]
+mod mixture_of_source_and_destination_ports_test {
+    use super::*;
+    use crate::{
+        cli::TcpObjectValidation, ip_header_test::IpHeaderTestObject, tcp::fake::FakePacketBody,
+    };
+
+    #[test]
+    fn when_one_matches_but_not_the_other() {
+        let validator = TcpObjectValidation::internal_new(Args {
+            interface: String::new(),
+            protocol: Some(Vec::new()),
+            source_port_range: Some(vec!["1020-1040".to_string(), "1060-1080".to_string()]),
+            source_port: Some(vec!["1050".to_string()]),
+            destination_port_range: Some(vec!["2020-2040".to_string(), "2060-2080".to_string()]),
+            destination_port: Some(vec!["2050".to_string()]),
+        })
+        .unwrap();
+
+        assert_eq!(
+            validator.should_packet_be_processed(
+                &IpHeaderTestObject::new(TransportLayerProtocol::Unknown(1)),
+                &FakePacketBody::new(1030, 2000)
+            ),
+            false
+        );
+        assert_eq!(
+            validator.should_packet_be_processed(
+                &IpHeaderTestObject::new(TransportLayerProtocol::Unknown(1)),
+                &FakePacketBody::new(1050, 2000)
+            ),
+            false
+        );
+        assert_eq!(
+            validator.should_packet_be_processed(
+                &IpHeaderTestObject::new(TransportLayerProtocol::Unknown(1)),
+                &FakePacketBody::new(1070, 2000)
+            ),
+            false
+        );
+
+        assert_eq!(
+            validator.should_packet_be_processed(
+                &IpHeaderTestObject::new(TransportLayerProtocol::Unknown(1)),
+                &FakePacketBody::new(1000, 2030)
+            ),
+            false
+        );
+        assert_eq!(
+            validator.should_packet_be_processed(
+                &IpHeaderTestObject::new(TransportLayerProtocol::Unknown(1)),
+                &FakePacketBody::new(1000, 2050)
+            ),
+            false
+        );
+        assert_eq!(
+            validator.should_packet_be_processed(
+                &IpHeaderTestObject::new(TransportLayerProtocol::Unknown(1)),
+                &FakePacketBody::new(1000, 2070)
+            ),
+            false
+        );
+    }
+
+    #[test]
+    fn when_both_matches() {
+        let validator = TcpObjectValidation::internal_new(Args {
+            interface: String::new(),
+            protocol: Some(Vec::new()),
+            source_port_range: Some(vec!["1020-1040".to_string(), "1060-1080".to_string()]),
+            source_port: Some(vec!["1050".to_string()]),
+            destination_port_range: Some(vec!["2020-2040".to_string(), "2060-2080".to_string()]),
+            destination_port: Some(vec!["2050".to_string()]),
+        })
+        .unwrap();
+
+        assert_eq!(
+            validator.should_packet_be_processed(
+                &IpHeaderTestObject::new(TransportLayerProtocol::Unknown(1)),
+                &FakePacketBody::new(1030, 2030)
+            ),
+            true
+        );
+        assert_eq!(
+            validator.should_packet_be_processed(
+                &IpHeaderTestObject::new(TransportLayerProtocol::Unknown(1)),
+                &FakePacketBody::new(1050, 2030)
+            ),
+            true
+        );
+        assert_eq!(
+            validator.should_packet_be_processed(
+                &IpHeaderTestObject::new(TransportLayerProtocol::Unknown(1)),
+                &FakePacketBody::new(1070, 2070)
+            ),
+            true
+        );
+
+        assert_eq!(
+            validator.should_packet_be_processed(
+                &IpHeaderTestObject::new(TransportLayerProtocol::Unknown(1)),
+                &FakePacketBody::new(1030, 2030)
+            ),
+            true
+        );
+        assert_eq!(
+            validator.should_packet_be_processed(
+                &IpHeaderTestObject::new(TransportLayerProtocol::Unknown(1)),
+                &FakePacketBody::new(1030, 2050)
+            ),
+            true
+        );
+        assert_eq!(
+            validator.should_packet_be_processed(
+                &IpHeaderTestObject::new(TransportLayerProtocol::Unknown(1)),
+                &FakePacketBody::new(1070, 2070)
+            ),
+            true
+        );
+    }
+
+    #[test]
+    fn when_neither_matches() {
+        let validator = TcpObjectValidation::internal_new(Args {
+            interface: String::new(),
+            protocol: Some(Vec::new()),
+            source_port_range: Some(vec!["1020-1040".to_string(), "1060-1080".to_string()]),
+            source_port: Some(vec!["1050".to_string()]),
+            destination_port_range: Some(vec!["2020-2040".to_string(), "2060-2080".to_string()]),
+            destination_port: Some(vec!["2050".to_string()]),
+        })
+        .unwrap();
+
+        assert_eq!(
+            validator.should_packet_be_processed(
+                &IpHeaderTestObject::new(TransportLayerProtocol::Unknown(1)),
+                &FakePacketBody::new(1000, 2000)
+            ),
+            false
+        );
+    }
+}
