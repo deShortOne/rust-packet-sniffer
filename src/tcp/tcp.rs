@@ -3,6 +3,7 @@ use std::cmp::min;
 use crate::{
     checksum_status::ChecksumStatus,
     ip_header::{IpObject, IpVersions},
+    tcp::PacketBodyObject,
 };
 
 pub struct TcpObject<'a> {
@@ -103,6 +104,15 @@ impl<'a> TcpObject<'a> {
             sum,
             self.check_sum,
         )
+    }
+}
+
+impl<'a> PacketBodyObject for TcpObject<'a> {
+    fn get_source_port(&self) -> u16 {
+        self.source_port
+    }
+    fn get_destination_port(&self) -> u16 {
+        self.destination_port
     }
 }
 

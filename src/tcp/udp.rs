@@ -1,6 +1,7 @@
 use crate::{
     checksum_status::ChecksumStatus,
     ip_header::{IpObject, IpVersions},
+    tcp::PacketBodyObject,
 };
 
 pub struct UdpObject<'a> {
@@ -46,6 +47,15 @@ impl<'a> UdpObject<'a> {
             sum,
             self.check_sum,
         )
+    }
+}
+
+impl<'a> PacketBodyObject for UdpObject<'a> {
+    fn get_source_port(&self) -> u16 {
+        self.source_port
+    }
+    fn get_destination_port(&self) -> u16 {
+        self.destination_port
     }
 }
 

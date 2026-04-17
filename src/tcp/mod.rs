@@ -1,7 +1,12 @@
 use crate::{ip_header::IpVersions, tcp::tcp::TcpObject, tcp::udp::UdpObject};
 
-mod tcp;
+pub mod tcp;
 mod udp;
+
+pub trait PacketBodyObject {
+    fn get_source_port(&self) -> u16;
+    fn get_destination_port(&self) -> u16;
+}
 
 pub fn map_tcp<'a>(ip_header: &'a IpVersions) -> Result<TcpObject<'a>, String> {
     TcpObject::new(ip_header)

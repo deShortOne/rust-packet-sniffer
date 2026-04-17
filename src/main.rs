@@ -1,6 +1,7 @@
 extern crate pnet;
 
 mod checksum_status;
+mod cli;
 mod custom_ip_address;
 mod helper;
 mod ip_header;
@@ -15,12 +16,12 @@ use pnet::packet::Packet;
 use pnet::packet::ethernet::{EtherTypes, EthernetPacket};
 
 use std::collections::HashMap;
-use std::env;
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::thread;
 use std::time::{Duration, Instant};
 
 use crate::checksum_status::ChecksumStatus;
+use crate::cli::TcpObjectValidation;
 use crate::ip_header::{IpHeader, IpObject, IpVersions};
 use crate::ip_header_v6::IpV6Header;
 use crate::packet_event::{
@@ -29,9 +30,17 @@ use crate::packet_event::{
 use crate::transport_layer_protocol::TransportLayerProtocol;
 
 fn main() {
+    let validation_object = match TcpObjectValidation::new() {
+        Ok(i) => i,
+        Err(reason) => {
+            eprintln!("{}", reason);
+            return;
+        }
+    };
+
     let (tx, rx) = mpsc::channel::<PacketSuccessMetric>();
     let producer = thread::spawn(move || {
-        handle_receiving_packets(&env::args().nth(1).unwrap(), tx);
+        handle_receiving_packets(&validation_object.interface, &validation_object, tx);
     });
     let consumer = thread::spawn(move || {
         handle_summary(rx);
@@ -247,7 +256,11 @@ fn print_biggest_value_for_key(dict_to_check: &HashMap<String, usize>, custom_mi
     println!("{source_ip_to_destination_ip_of_biggest_count} {custom_middle_text} {biggest_count}");
 }
 
-fn handle_receiving_packets(interface_name: &str, successful_sender: Sender<PacketSuccessMetric>) {
+fn handle_receiving_packets(
+    interface_name: &str,
+    validation_object: &TcpObjectValidation,
+    successful_sender: Sender<PacketSuccessMetric>,
+) {
     let interface_names_match = |iface: &NetworkInterface| iface.name == interface_name;
 
     // Find the network interface with the provided name
@@ -352,6 +365,12 @@ fn handle_receiving_packets(interface_name: &str, successful_sender: Sender<Pack
                         }
                     };
 
+                    if !validation_object
+                        .should_packet_be_processed(&ip_header_and_data, &tcp_object)
+                    {
+                        continue;
+                    }
+
                     match tcp_object.is_valid() {
                         ChecksumStatus::FullyMatched => println!("It fully matches!"),
                         ChecksumStatus::PartialMatch => println!("It partially matches!"),
@@ -412,6 +431,12 @@ fn handle_receiving_packets(interface_name: &str, successful_sender: Sender<Pack
                             continue;
                         }
                     };
+
+                    if !validation_object
+                        .should_packet_be_processed(&ip_header_and_data, &udp_object)
+                    {
+                        continue;
+                    }
 
                     match udp_object.is_valid() {
                         ChecksumStatus::FullyMatched => println!("It fully matches!"),
