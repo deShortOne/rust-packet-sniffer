@@ -106,8 +106,8 @@ pub struct IpHeader<'a> {
 impl<'a> IpHeader<'a> {
     pub fn new(payload: &'a [u8]) -> Result<Self, String> {
         let version_and_ihl = format!("{:x}", payload[0]);
-        let version = match &version_and_ihl.chars().nth(0) {
-            Some(c) => c.to_digit(10).unwrap(),
+        let version = match version_and_ihl.chars().nth(0).and_then(|c| c.to_digit(10)) {
+            Some(c) => c,
             None => {
                 return Err(format!(
                     "IpHeader version couldn't parse, attempted from payload: {:?}",
@@ -115,8 +115,8 @@ impl<'a> IpHeader<'a> {
                 ));
             }
         };
-        let ihl = 4 * match &version_and_ihl.chars().nth(1) {
-            Some(c) => c.to_digit(10).unwrap(),
+        let ihl = 4 * match &version_and_ihl.chars().nth(1).and_then(|c| c.to_digit(10)) {
+            Some(c) => c,
             None => {
                 return Err(format!(
                     "IpHeader ihl couldn't parse, attempted from payload: {:?}",

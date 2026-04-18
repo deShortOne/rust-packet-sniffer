@@ -64,34 +64,73 @@ impl TcpObjectValidation {
         let mut source_port_ranges_to_accept: Vec<(u16, u16)> = Vec::new();
         if let Some(source_port_ranges) = args.source_port_range {
             for source_port_range in source_port_ranges {
-                let ranges: Vec<&str> = source_port_range.split("-").collect();
-                source_port_ranges_to_accept.push((
-                    ranges[0].parse::<u16>().unwrap(),
-                    ranges[1].parse::<u16>().unwrap(),
-                ));
+                let ranges = source_port_range
+                    .split("-")
+                    .map(str::parse::<u16>)
+                    .collect::<Result<Vec<_>, _>>();
+                match ranges {
+                    Ok(range) if range.len() == 2 => {
+                        if range[0] > range[1] {
+                            return Err(format!(
+                                "--source-port-range expects left value to be smaller or equal to right number but for ({}, {})",
+                                range[0], range[1]
+                            ));
+                        }
+                        source_port_ranges_to_accept.push((range[0], range[1]));
+                    }
+                    _ => {
+                        return Err(
+                            "--source-port-range expects a range of port numbers in the format of \"1000-2000\"".to_string()
+                        );
+                    }
+                }
             }
         }
         let mut source_port_to_accept: Vec<u16> = Vec::new();
         if let Some(source_ports) = args.source_port {
             for source_port_range in source_ports {
-                source_port_to_accept.push(source_port_range.parse::<u16>().unwrap());
+                match source_port_range.parse::<u16>() {
+                    Ok(i) => source_port_to_accept.push(i),
+                    Err(_) => {
+                        return Err("--source-port expects a singular port number".to_string());
+                    }
+                }
             }
         }
 
         let mut destination_port_ranges_to_accept: Vec<(u16, u16)> = Vec::new();
         if let Some(destination_port_ranges) = args.destination_port_range {
             for destination_port_range in destination_port_ranges {
-                let ranges: Vec<&str> = destination_port_range.split("-").collect();
-                destination_port_ranges_to_accept.push((
-                    ranges[0].parse::<u16>().unwrap(),
-                    ranges[1].parse::<u16>().unwrap(),
-                ));
+                let ranges = destination_port_range
+                    .split("-")
+                    .map(str::parse::<u16>)
+                    .collect::<Result<Vec<_>, _>>();
+                match ranges {
+                    Ok(range) if range.len() == 2 => {
+                        if range[0] > range[1] {
+                            return Err(format!(
+                                "--destination-port-range expects left value to be smaller or equal to right number but for ({}, {})",
+                                range[0], range[1]
+                            ));
+                        }
+                        destination_port_ranges_to_accept.push((range[0], range[1]))
+                    }
+                    _ => 
+                        return Err(
+                            "--destination-port-range expects a range of port numbers in the format of \"1000-2000\"".to_string()
+                        )
+                }
             }
         }
         let mut destination_port_to_accept: Vec<u16> = Vec::new();
         if let Some(destination_ports) = args.destination_port {
             for destination_port_range in destination_ports {
-                destination_port_to_accept.push(destination_port_range.parse::<u16>().unwrap());
+                match destination_port_range.parse::<u16>() {
+                    Ok(i) => destination_port_to_accept.push(i),
+                    Err(_) => {
+                        return Err("--destination-port expects a singular port number".to_string());
+                    }
+                }
             }
         }
 

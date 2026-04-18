@@ -48,10 +48,13 @@ fn main() {
     });
 
     match producer.join() {
-        Ok(i) => println!("{:?}", i),
-        Err(i) => eprintln!("{:?}", i),
+        Ok(i) => println!("consumer joined successfully: {:?}", i),
+        Err(i) => eprintln!("Producer joined fail: {:?}", i),
     };
-    consumer.join().unwrap();
+    match consumer.join() {
+        Ok(i) => println!("consumer joined successfully: {:?}", i),
+        Err(i) => eprintln!("consumer joined fail: {:?}", i),
+    };
 }
 
 fn handle_summary(receiver: Receiver<PacketSuccessMetric>) {
@@ -284,7 +287,13 @@ fn handle_receiving_packets(
     loop {
         match rx.next() {
             Ok(packet) => {
-                let packet = EthernetPacket::new(packet).unwrap();
+                let packet = match EthernetPacket::new(packet) {
+                    Some(i) => i,
+                    None => {
+                        println!("Failed to create ethernet packet");
+                        continue;
+                    }
+                };
 
                 let payload = packet.payload();
                 let ip_header_and_data: IpVersions;
@@ -307,19 +316,21 @@ fn handle_receiving_packets(
                     };
                     ip_header_and_data = IpVersions::V6(ip_header_and_data_internal);
                 } else {
-                    successful_sender
-                        .send(PacketSuccessMetric::NotHandled(NotHandledPacket {
+                    if let Err(i) =
+                        successful_sender.send(PacketSuccessMetric::NotHandled(NotHandledPacket {
                             not_handled_ethertype: packet.get_ethertype().to_string(),
                         }))
-                        .unwrap();
+                    {
+                        eprintln!("Failed to send packet success metric due to: {}", i)
+                    }
                     continue;
                 }
 
                 if let TransportLayerProtocol::Unknown(protocol_number) =
                     ip_header_and_data.get_protocol()
                 {
-                    successful_sender
-                        .send(PacketSuccessMetric::Fail(FailedPacketParsed {
+                    if let Err(i) =
+                        successful_sender.send(PacketSuccessMetric::Fail(FailedPacketParsed {
                             ip_version: ip_header_and_data.get_version(),
                             protocol: ip_header_and_data.get_protocol(),
                             source_location: ip_header_and_data.get_source_ip(),
@@ -329,20 +340,24 @@ fn handle_receiving_packets(
                                 protocol_number
                             ),
                         }))
-                        .unwrap();
+                    {
+                        eprintln!("Failed to send packet success metric due to: {}", i)
+                    }
                     continue;
                 }
 
                 if let Err(reason) = ip_header_and_data.is_valid() {
-                    successful_sender
-                        .send(PacketSuccessMetric::Fail(FailedPacketParsed {
+                    if let Err(i) =
+                        successful_sender.send(PacketSuccessMetric::Fail(FailedPacketParsed {
                             ip_version: ip_header_and_data.get_version(),
                             protocol: ip_header_and_data.get_protocol(),
                             source_location: ip_header_and_data.get_source_ip(),
                             destination_location: ip_header_and_data.get_destination_ip(),
                             reason_for_failure: reason,
                         }))
-                        .unwrap();
+                    {
+                        eprintln!("Failed to send packet success metric due to: {}", i)
+                    }
                     continue;
                 }
 
@@ -350,8 +365,8 @@ fn handle_receiving_packets(
                     let tcp_object = match tcp::map_tcp(&ip_header_and_data) {
                         Ok(i) => i,
                         Err(reason) => {
-                            successful_sender
-                                .send(PacketSuccessMetric::Fail(FailedPacketParsed {
+                            if let Err(i) = successful_sender.send(PacketSuccessMetric::Fail(
+                                FailedPacketParsed {
                                     ip_version: ip_header_and_data.get_version(),
                                     protocol: ip_header_and_data.get_protocol(),
                                     source_location: ip_header_and_data.get_source_ip(),
@@ -360,8 +375,10 @@ fn handle_receiving_packets(
                                         "Unable to create tcp objecte due to {}",
                                         reason
                                     ),
-                                }))
-                                .unwrap();
+                                },
+                            )) {
+                                eprintln!("Failed to send packet success metric due to: {}", i)
+                            }
                             continue;
                         }
                     };
@@ -394,8 +411,8 @@ fn handle_receiving_packets(
                         ip_header_and_data.get_protocol(),
                         tcp_object.content,
                     );
-                    successful_sender
-                        .send(PacketSuccessMetric::Success(SuccessfulPacketParsed {
+                    if let Err(i) = successful_sender.send(PacketSuccessMetric::Success(
+                        SuccessfulPacketParsed {
                             ip_version: ip_header_and_data.get_version(),
                             protocol: ip_header_and_data.get_protocol(),
                             source_location: format!(
@@ -411,14 +428,16 @@ fn handle_receiving_packets(
                             content_size: tcp_object.content.len(),
                             tcp_flag: tcp_object.flag,
                             tcp_ttl: ip_header_and_data.get_ttl(),
-                        }))
-                        .unwrap();
+                        },
+                    )) {
+                        eprintln!("Failed to send packet success metric due to: {}", i)
+                    }
                 } else if ip_header_and_data.get_protocol() == TransportLayerProtocol::UDP {
                     let udp_object = match tcp::map_udp(&ip_header_and_data) {
                         Ok(i) => i,
                         Err(reason) => {
-                            successful_sender
-                                .send(PacketSuccessMetric::Fail(FailedPacketParsed {
+                            if let Err(i) = successful_sender.send(PacketSuccessMetric::Fail(
+                                FailedPacketParsed {
                                     ip_version: ip_header_and_data.get_version(),
                                     protocol: ip_header_and_data.get_protocol(),
                                     source_location: ip_header_and_data.get_source_ip(),
@@ -427,8 +446,10 @@ fn handle_receiving_packets(
                                         "Unable to create udp objecte due to {}",
                                         reason
                                     ),
-                                }))
-                                .unwrap();
+                                },
+                            )) {
+                                eprintln!("Failed to send packet success metric due to: {}", i)
+                            }
                             continue;
                         }
                     };
@@ -469,8 +490,8 @@ fn handle_receiving_packets(
                         ip_header_and_data.get_protocol(),
                         udp_object.content,
                     );
-                    successful_sender
-                        .send(PacketSuccessMetric::Success(SuccessfulPacketParsed {
+                    if let Err(i) = successful_sender.send(PacketSuccessMetric::Success(
+                        SuccessfulPacketParsed {
                             ip_version: ip_header_and_data.get_version(),
                             protocol: ip_header_and_data.get_protocol(),
                             source_location: format!(
@@ -487,11 +508,13 @@ fn handle_receiving_packets(
 
                             tcp_flag: String::new(),
                             tcp_ttl: 0,
-                        }))
-                        .unwrap();
+                        },
+                    )) {
+                        eprintln!("Failed to send packet success metric due to: {}", i)
+                    }
                 } else {
-                    successful_sender
-                        .send(PacketSuccessMetric::Fail(FailedPacketParsed {
+                    if let Err(i) =
+                        successful_sender.send(PacketSuccessMetric::Fail(FailedPacketParsed {
                             ip_version: ip_header_and_data.get_version(),
                             protocol: ip_header_and_data.get_protocol(),
                             source_location: ip_header_and_data.get_source_ip(),
@@ -501,7 +524,9 @@ fn handle_receiving_packets(
                                 ip_header_and_data.get_protocol()
                             ),
                         }))
-                        .unwrap();
+                    {
+                        eprintln!("Failed to send packet success metric due to: {}", i)
+                    }
                 }
             }
             Err(e) => {
