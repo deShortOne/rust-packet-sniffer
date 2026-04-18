@@ -61,6 +61,8 @@ impl<'a> IpObject for IpV6Header<'a> {
     }
 
     fn is_valid(&self) -> Result<(), String> {
+        // this is fine as ipv6 has no checksum according to RFC 2460
+        // so this is fine
         Ok(())
     }
 
