@@ -39,3 +39,7 @@ Postgres have other modes like Parse etc. See [postgresql wire protocol](https:/
 ## TCP checksum
 There exists a thing call "partial checksums" where the tcp checksum will only be calculated from the pseduoheader and not the full thing.
 So the tcp checksum in Wireshark is not the final checksum but the partial checksum computed by the OS before the NIC finishes it. Explains why the given checksum and the computed checksum were often quite close...
+
+## TransportLayerProtocol
+Messed around with using TryFrom instead of Try and removing Unknown but would make it harder to send information about that because ip header wouldn't have been constructed so ip etc. would need to be returned alongside the error.
+TryFrom would be more correct as it should error if the protocol number is unknown.

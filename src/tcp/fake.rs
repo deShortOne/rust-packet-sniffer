@@ -1,12 +1,12 @@
 use crate::tcp::PacketBodyObject;
 
-pub struct FakePacketBody {
+pub struct _FakePacketBody {
     source_port: u16,
     destination_port: u16,
 }
 
-impl FakePacketBody {
-    pub fn new(source_port: u16, destination_port: u16) -> Self {
+impl _FakePacketBody {
+    pub fn _new(source_port: u16, destination_port: u16) -> Self {
         Self {
             source_port,
             destination_port,
@@ -14,7 +14,7 @@ impl FakePacketBody {
     }
 }
 
-impl PacketBodyObject for FakePacketBody {
+impl PacketBodyObject for _FakePacketBody {
     fn get_destination_port(&self) -> u16 {
         self.destination_port
     }

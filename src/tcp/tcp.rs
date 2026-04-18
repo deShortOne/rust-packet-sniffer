@@ -101,8 +101,8 @@ impl<'a> TcpObject<'a> {
     }
 
     pub fn is_valid(&self) -> ChecksumStatus {
-        let protocol_num: usize = self.based_off.get_protocol().into();
-        let sum = (self.based_off.get_segment_length() + protocol_num) as u32;
+        let protocol_num: u8 = self.based_off.get_protocol().into();
+        let sum = (self.based_off.get_segment_length() + protocol_num as usize) as u32;
 
         compare_tcp_checksum(
             self.based_off.get_source_ip_raw(),

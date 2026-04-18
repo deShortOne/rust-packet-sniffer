@@ -43,7 +43,7 @@ impl<'a> UdpObject<'a> {
     }
 
     pub fn is_valid(&self) -> ChecksumStatus {
-        let protocol_num: usize = self.based_off.get_protocol().into();
+        let protocol_num: u8 = self.based_off.get_protocol().into();
         let sum = self.length as u32 + protocol_num as u32;
 
         compare_udp_checksum(

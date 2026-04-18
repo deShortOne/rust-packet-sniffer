@@ -1,16 +1,16 @@
 use crate::{ip_header::IpObject, transport_layer_protocol::TransportLayerProtocol};
 
-pub struct IpHeaderTestObject {
+pub struct _IpHeaderTestObject {
     protocol: TransportLayerProtocol,
 }
 
-impl IpHeaderTestObject {
-    pub fn new(protocol: TransportLayerProtocol) -> Self {
+impl _IpHeaderTestObject {
+    pub fn _new(protocol: TransportLayerProtocol) -> Self {
         Self { protocol }
     }
 }
 
-impl IpObject for IpHeaderTestObject {
+impl IpObject for _IpHeaderTestObject {
     fn get_data(&self) -> &[u8] {
         &[0; 0]
     }

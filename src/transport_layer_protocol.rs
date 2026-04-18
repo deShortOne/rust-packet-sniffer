@@ -7,12 +7,12 @@ pub enum TransportLayerProtocol {
     Unknown(u8),
 }
 
-impl Into<usize> for TransportLayerProtocol {
-    fn into(self) -> usize {
-        match self {
+impl From<TransportLayerProtocol> for u8 {
+    fn from(value: TransportLayerProtocol) -> Self {
+        match value {
             TransportLayerProtocol::TCP => 6,
-            TransportLayerProtocol::UDP => 12,
-            TransportLayerProtocol::Unknown(i) => i as usize,
+            TransportLayerProtocol::UDP => 17,
+            TransportLayerProtocol::Unknown(i) => i,
         }
     }
 }
