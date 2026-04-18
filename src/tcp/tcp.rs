@@ -24,6 +24,13 @@ pub struct TcpObject<'a> {
 impl<'a> TcpObject<'a> {
     pub fn new(ip_header: &'a IpVersions) -> Result<Self, String> {
         let tcp_payload = ip_header.get_data();
+        if tcp_payload.len() < 20 {
+            return Err(format!(
+                "tcp payload has a minimum size of 20, but got {}",
+                tcp_payload.len()
+            ));
+        }
+
         let source_port = (tcp_payload[0] as u16) << 8 | tcp_payload[1] as u16;
         let destination_port = (tcp_payload[2] as u16) << 8 | tcp_payload[3] as u16;
         let _sequence_number = (tcp_payload[4] as u32) << 24

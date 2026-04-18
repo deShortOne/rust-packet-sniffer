@@ -16,12 +16,18 @@ pub struct UdpObject<'a> {
 
 impl<'a> UdpObject<'a> {
     pub fn new(ip_header: &'a IpVersions) -> Result<Self, String> {
-        let tcp_payload = ip_header.get_data();
-        let source_port = (tcp_payload[0] as u16) << 8 | tcp_payload[1] as u16;
-        let destination_port = (tcp_payload[2] as u16) << 8 | tcp_payload[3] as u16;
-        let length = (tcp_payload[4] as u16) << 8 | tcp_payload[5] as u16;
-        let check_sum = (tcp_payload[6] as u16) << 8 | tcp_payload[7] as u16;
-        let content = tcp_payload[8..]
+        let udp_payload = ip_header.get_data();
+        if udp_payload.len() < 28 {
+            return Err(format!(
+                "udp payload has a minimum size of 28, but got {}",
+                udp_payload.len()
+            ));
+        }
+        let source_port = (udp_payload[0] as u16) << 8 | udp_payload[1] as u16;
+        let destination_port = (udp_payload[2] as u16) << 8 | udp_payload[3] as u16;
+        let length = (udp_payload[4] as u16) << 8 | udp_payload[5] as u16;
+        let check_sum = (udp_payload[6] as u16) << 8 | udp_payload[7] as u16;
+        let content = udp_payload[8..]
             .iter()
             .map(|c| *c as char)
             .collect::<String>();
