@@ -1,6 +1,6 @@
 use crate::{
     checksum_status::ChecksumStatus,
-    ip_header::{IpObject, IpVersions},
+    ip_headers::ip_header::{IpObject, IpVersions},
     tcp::PacketBodyObject,
 };
 

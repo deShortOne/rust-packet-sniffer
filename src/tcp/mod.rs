@@ -1,4 +1,6 @@
-use crate::{ip_header::IpVersions, tcp::tcp::TcpObject, tcp::udp::UdpObject};
+use crate::ip_headers::ip_header::IpVersions;
+use crate::tcp::tcp::TcpObject;
+use crate::tcp::udp::UdpObject;
 
 pub mod fake;
 mod tcp;

@@ -4,9 +4,7 @@ mod checksum_status;
 mod cli;
 mod custom_ip_address;
 mod helper;
-mod ip_header;
-mod ip_header_test;
-mod ip_header_v6;
+mod ip_headers;
 mod packet_event;
 mod tcp;
 mod transport_layer_protocol;
@@ -23,8 +21,9 @@ use std::time::{Duration, Instant};
 
 use crate::checksum_status::ChecksumStatus;
 use crate::cli::TcpObjectValidation;
-use crate::ip_header::{IpHeader, IpObject, IpVersions};
-use crate::ip_header_v6::IpV6Header;
+use crate::ip_headers::ip_header::{IpObject, IpVersions};
+use crate::ip_headers::ip_header_v4::IpV4Header;
+use crate::ip_headers::ip_header_v6::IpV6Header;
 use crate::packet_event::{
     FailedPacketParsed, NotHandledPacket, PacketSuccessMetric, SuccessfulPacketParsed,
 };
@@ -298,7 +297,7 @@ fn handle_receiving_packets(
                 let payload = packet.payload();
                 let ip_header_and_data: IpVersions;
                 if packet.get_ethertype() == EtherTypes::Ipv4 {
-                    let ip_header_and_data_internal = match IpHeader::new(payload) {
+                    let ip_header_and_data_internal = match IpV4Header::new(payload) {
                         Ok(obj) => obj,
                         Err(msg) => {
                             eprintln!("failed to parse ip header due to {}", msg);
@@ -372,7 +371,7 @@ fn handle_receiving_packets(
                                     source_location: ip_header_and_data.get_source_ip(),
                                     destination_location: ip_header_and_data.get_destination_ip(),
                                     reason_for_failure: format!(
-                                        "Unable to create tcp objecte due to {}",
+                                        "Unable to create tcp object due to {}",
                                         reason
                                     ),
                                 },
@@ -443,7 +442,7 @@ fn handle_receiving_packets(
                                     source_location: ip_header_and_data.get_source_ip(),
                                     destination_location: ip_header_and_data.get_destination_ip(),
                                     reason_for_failure: format!(
-                                        "Unable to create udp objecte due to {}",
+                                        "Unable to create udp object due to {}",
                                         reason
                                     ),
                                 },

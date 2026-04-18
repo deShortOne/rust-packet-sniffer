@@ -1,4 +1,5 @@
-use crate::{ip_header::IpObject, transport_layer_protocol::TransportLayerProtocol};
+use crate::ip_headers::ip_header::IpObject;
+use crate::transport_layer_protocol::TransportLayerProtocol;
 
 pub struct _IpHeaderTestObject {
     protocol: TransportLayerProtocol,

@@ -1,8 +1,8 @@
 use clap::Parser;
 
-use crate::{
-    ip_header::IpObject, tcp::PacketBodyObject, transport_layer_protocol::TransportLayerProtocol,
-};
+use crate::ip_headers::ip_header::IpObject;
+use crate::tcp::PacketBodyObject;
+use crate::transport_layer_protocol::TransportLayerProtocol;
 
 /// Simple program to greet a person
 #[derive(Parser, Debug)]
@@ -202,7 +202,7 @@ impl TcpObjectValidation {
 
 #[cfg(test)]
 mod source_port_test {
-    use crate::ip_header_test::_IpHeaderTestObject;
+    use crate::ip_headers::ip_header_test::_IpHeaderTestObject;
     use crate::tcp::fake::_FakePacketBody;
 
     use super::*;
@@ -492,7 +492,7 @@ mod source_port_test {
 
 #[cfg(test)]
 mod destination_port_test {
-    use crate::ip_header_test::_IpHeaderTestObject;
+    use crate::ip_headers::ip_header_test::_IpHeaderTestObject;
     use crate::tcp::fake::_FakePacketBody;
 
     use super::*;
@@ -594,9 +594,9 @@ mod destination_port_test {
 #[cfg(test)]
 mod mixture_of_source_and_destination_ports_test {
     use super::*;
-    use crate::{
-        cli::TcpObjectValidation, ip_header_test::_IpHeaderTestObject, tcp::fake::_FakePacketBody,
-    };
+    use crate::cli::TcpObjectValidation;
+     use crate::ip_headers::ip_header_test::_IpHeaderTestObject;
+    use crate:: tcp::fake::_FakePacketBody;
 
     #[test]
     fn when_one_matches_but_not_the_other() {

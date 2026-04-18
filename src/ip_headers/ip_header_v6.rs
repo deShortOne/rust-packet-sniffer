@@ -1,8 +1,6 @@
-use crate::{
-    custom_ip_address::{IpAddress, IpV6Address},
-    ip_header::IpObject,
-    transport_layer_protocol::TransportLayerProtocol,
-};
+use crate::custom_ip_address::{IpAddress, IpV6Address};
+use crate::ip_headers::ip_header::IpObject;
+use crate::transport_layer_protocol::TransportLayerProtocol;
 
 pub struct IpV6Header<'a> {
     pub version: u8,

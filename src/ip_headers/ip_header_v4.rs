@@ -1,91 +1,8 @@
-use crate::{
-    TransportLayerProtocol,
-    custom_ip_address::{IpAddress, IpV4Address},
-    ip_header_v6::IpV6Header,
-};
+use crate::custom_ip_address::{IpAddress, IpV4Address};
+use crate::ip_headers::ip_header::IpObject;
+use crate::transport_layer_protocol::TransportLayerProtocol;
 
-pub enum IpVersions<'a> {
-    V4(IpHeader<'a>),
-    V6(IpV6Header<'a>),
-}
-
-impl<'a> IpObject for IpVersions<'a> {
-    fn get_data(&self) -> &[u8] {
-        match self {
-            IpVersions::V4(i) => i.get_data(),
-            IpVersions::V6(i) => i.get_data(),
-        }
-    }
-    fn get_segment_length(&self) -> usize {
-        match self {
-            IpVersions::V4(i) => i.get_segment_length(),
-            IpVersions::V6(i) => i.get_segment_length(),
-        }
-    }
-    fn is_valid(&self) -> Result<(), String> {
-        match self {
-            IpVersions::V4(i) => i.is_valid(),
-            IpVersions::V6(i) => i.is_valid(),
-        }
-    }
-    fn get_protocol(&self) -> TransportLayerProtocol {
-        match self {
-            IpVersions::V4(i) => i.get_protocol(),
-            IpVersions::V6(i) => i.get_protocol(),
-        }
-    }
-    fn get_version(&self) -> u32 {
-        match self {
-            IpVersions::V4(i) => i.get_version(),
-            IpVersions::V6(i) => i.get_version(),
-        }
-    }
-    fn get_source_ip(&self) -> String {
-        match self {
-            IpVersions::V4(i) => i.get_source_ip(),
-            IpVersions::V6(i) => i.get_source_ip(),
-        }
-    }
-    fn get_source_ip_raw(&self) -> &[u8] {
-        match self {
-            IpVersions::V4(i) => i.get_source_ip_raw(),
-            IpVersions::V6(i) => i.get_source_ip_raw(),
-        }
-    }
-    fn get_destination_ip(&self) -> String {
-        match self {
-            IpVersions::V4(i) => i.get_destination_ip(),
-            IpVersions::V6(i) => i.get_destination_ip(),
-        }
-    }
-    fn get_destination_ip_raw(&self) -> &[u8] {
-        match self {
-            IpVersions::V4(i) => i.get_destination_ip_raw(),
-            IpVersions::V6(i) => i.get_destination_ip_raw(),
-        }
-    }
-    fn get_ttl(&self) -> u8 {
-        match self {
-            IpVersions::V4(i) => i.get_ttl(),
-            IpVersions::V6(i) => i.get_ttl(),
-        }
-    }
-}
-
-pub trait IpObject {
-    fn get_data(&self) -> &[u8];
-    fn get_segment_length(&self) -> usize;
-    fn is_valid(&self) -> Result<(), String>;
-    fn get_protocol(&self) -> TransportLayerProtocol;
-    fn get_version(&self) -> u32;
-    fn get_source_ip(&self) -> String;
-    fn get_source_ip_raw(&self) -> &[u8];
-    fn get_destination_ip(&self) -> String;
-    fn get_destination_ip_raw(&self) -> &[u8];
-    fn get_ttl(&self) -> u8;
-}
-
-pub struct IpHeader<'a> {
+pub struct IpV4Header<'a> {
     pub version: u32,
     pub ihl: u32,
     pub _tos: u8,
@@ -103,7 +20,7 @@ pub struct IpHeader<'a> {
     entire_payload_cause_im_lazy_plus_its_only_being_referenced: &'a [u8],
 }
 
-impl<'a> IpHeader<'a> {
+impl<'a> IpV4Header<'a> {
     pub fn new(payload: &'a [u8]) -> Result<Self, String> {
         let version_and_ihl = format!("{:x}", payload[0]);
         let version = match version_and_ihl.chars().nth(0).and_then(|c| c.to_digit(10)) {
@@ -171,7 +88,7 @@ impl<'a> IpHeader<'a> {
     }
 }
 
-impl<'a> IpObject for IpHeader<'a> {
+impl<'a> IpObject for IpV4Header<'a> {
     fn get_data(&self) -> &[u8] {
         self.data
     }
@@ -220,7 +137,7 @@ impl<'a> IpObject for IpHeader<'a> {
     }
 }
 
-fn calculate_ip_header_checksum(data: &IpHeader) -> u16 {
+fn calculate_ip_header_checksum(data: &IpV4Header) -> u16 {
     let mut sum = 0u32;
     for i in 0..10 {
         if i == 5 {
