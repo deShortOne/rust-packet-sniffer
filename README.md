@@ -19,8 +19,9 @@ ip address
 
 Run the app, passing in interface name (requires running with sudo0)
 ```bash
-cargo run -- docker0
+cargo run -- --interface docker0
 ```
+Can add additional arguments like `source-port-range` and `protocol`
 
 Send a query to the database
 ```sql
