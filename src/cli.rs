@@ -37,6 +37,7 @@ struct Args {
 
 pub struct TcpObjectValidation {
     pub interface: String,
+    pub is_arp_allowed: bool,
     protocols: Box<[TransportLayerProtocol]>,
     source_port: Box<[u16]>,
     source_port_range: Box<[(u16, u16)]>,
@@ -137,6 +138,7 @@ impl TcpObjectValidation {
 
         Ok(Self {
             interface: args.interface,
+            is_arp_allowed: protocols_to_accept.contains(&TransportLayerProtocol::ARP),
             protocols: protocols_to_accept.into_boxed_slice(),
             source_port: source_port_to_accept.into_boxed_slice(),
             source_port_range: source_port_ranges_to_accept.into_boxed_slice(),

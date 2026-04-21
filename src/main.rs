@@ -333,7 +333,7 @@ fn handle_receiving_packets(
                 };
 
                 let payload = packet.payload();
-                if packet.get_ethertype() == EtherTypes::Arp {
+                if packet.get_ethertype() == EtherTypes::Arp && validation_object.is_arp_allowed {
                     let _ = match tcp::map_arp(payload) {
                         Ok(i) => {
                             if i.op_code == ArpOperation::Request {
@@ -345,7 +345,7 @@ fn handle_receiving_packets(
                                 );
                             } else if i.op_code == ArpOperation::Reply {
                                 println!(
-                                    "Arp reply: {} ({}) is replying {} ({})",
+                                    "Arp reply: {} ({}) is replying to {} ({})",
                                     i.sender_ip_address.to_string(),
                                     i.sender_mac_address.to_string(),
                                     i.target_ip_address.to_string(),
