@@ -1,5 +1,5 @@
 use crate::ip_headers::ip_header::IpObject;
-use crate::locator::custom_ip_address::{IpAddress, IpV6Address};
+use crate::locator::custom_ip_address::{IpAddress, IpAddressVariant, IpV6Address};
 use crate::transport_layer_protocol::TransportLayerProtocol;
 
 pub struct IpV6Header<'a> {
@@ -9,8 +9,8 @@ pub struct IpV6Header<'a> {
     pub payload_length: u16,
     pub next_header: TransportLayerProtocol,
     pub hop_limit: u8,
-    pub source_ip: IpV6Address<'a>,
-    pub destination_ip: IpV6Address<'a>,
+    pub source_ip: IpV6Address,
+    pub destination_ip: IpV6Address,
     pub data: &'a [u8],
 }
 
@@ -74,12 +74,20 @@ impl<'a> IpObject for IpV6Header<'a> {
         self.version.into()
     }
 
+    fn get_source(&self) -> IpAddressVariant {
+        IpAddressVariant::V6(self.source_ip.clone())
+    }
+
     fn get_source_ip(&self) -> String {
         self.source_ip.to_string()
     }
 
     fn get_source_ip_raw(&self) -> &[u8] {
         self.source_ip.get_raw_bytes()
+    }
+
+    fn get_destination(&self) -> IpAddressVariant {
+        IpAddressVariant::V6(self.destination_ip.clone())
     }
 
     fn get_destination_ip(&self) -> String {

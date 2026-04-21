@@ -2,21 +2,21 @@ use std::fmt;
 
 use crate::helper::join_nums;
 
-pub struct MacAddress<'a> {
+pub struct MacAddress {
     address: String,
-    _address_raw: &'a [u8],
+    _address_raw: Vec<u8>,
 }
 
-impl<'a> MacAddress<'a> {
-    pub fn new(address: &'a [u8]) -> Self {
+impl MacAddress {
+    pub fn new(address: &[u8]) -> Self {
         Self {
             address: join_nums(address, ":"),
-            _address_raw: address,
+            _address_raw: address.to_vec(),
         }
     }
 }
 
-impl<'a> fmt::Display for MacAddress<'a> {
+impl fmt::Display for MacAddress {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", self.address)
     }

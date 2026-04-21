@@ -13,7 +13,7 @@ pub trait PacketBodyObject {
     fn get_destination_port(&self) -> u16;
 }
 
-pub fn map_arp<'a>(data: &'a [u8]) -> Result<ArpObject<'a>, String> {
+pub fn map_arp<'a>(data: &'a [u8]) -> Result<ArpObject, String> {
     ArpObject::new(data)
 }
 

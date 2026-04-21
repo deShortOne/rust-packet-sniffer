@@ -24,6 +24,8 @@ use crate::cli::TcpObjectValidation;
 use crate::ip_headers::ip_header::{IpObject, IpVersions};
 use crate::ip_headers::ip_header_v4::IpV4Header;
 use crate::ip_headers::ip_header_v6::IpV6Header;
+use crate::locator::custom_ip_address::IpAddressVariant;
+use crate::locator::mac_address::MacAddress;
 use crate::packet_event::{
     ArpPacketSuccess, FailedPacketParsed, NotHandledPacket, PacketSuccessMetric,
     SuccessfulPacketParsed,
@@ -79,7 +81,7 @@ fn handle_summary(receiver: Receiver<PacketSuccessMetric>) {
     let mut dropped_packet_ethertypes: HashMap<String, usize> = HashMap::new();
 
     let mut number_of_successful_arp_packets: usize = 0;
-    let mut ip_address_to_mac_address: HashMap<String, String> = HashMap::new();
+    let mut ip_address_to_mac_address: HashMap<IpAddressVariant, MacAddress> = HashMap::new();
     let mut number_of_failed_arp_packets: usize = 0;
     let mut reasons_for_arp_failure: HashMap<String, usize> = HashMap::new();
 
@@ -96,7 +98,7 @@ fn handle_summary(receiver: Receiver<PacketSuccessMetric>) {
                     ip_address_to_mac_address
                         .entry(a.sender_address.ip_address)
                         .or_insert(a.sender_address.mac_address);
-                    if a.operation == ArpOperation::Reply.to_string() {
+                    if a.operation == ArpOperation::Reply {
                         ip_address_to_mac_address
                             .entry(a.target_address.ip_address)
                             .or_insert(a.target_address.mac_address);
@@ -334,7 +336,7 @@ fn handle_receiving_packets(
 
                 let payload = packet.payload();
                 if packet.get_ethertype() == EtherTypes::Arp && validation_object.is_arp_allowed {
-                    let _ = match tcp::map_arp(payload) {
+                    let send_packet_res = match tcp::map_arp(payload) {
                         Ok(i) => {
                             if i.op_code == ArpOperation::Request {
                                 println!(
@@ -363,14 +365,14 @@ fn handle_receiving_packets(
 
                             successful_sender.send(PacketSuccessMetric::ArpSuccess(
                                 ArpPacketSuccess {
-                                    operation: i.op_code.to_string(),
+                                    operation: i.op_code,
                                     sender_address: packet_event::ArpPacketAddress {
-                                        mac_address: i.sender_mac_address.to_string(),
-                                        ip_address: i.sender_ip_address.to_string(),
+                                        mac_address: i.sender_mac_address,
+                                        ip_address: i.sender_ip_address,
                                     },
                                     target_address: packet_event::ArpPacketAddress {
-                                        mac_address: i.target_mac_address.to_string(),
-                                        ip_address: i.target_ip_address.to_string(),
+                                        mac_address: i.target_mac_address,
+                                        ip_address: i.target_ip_address,
                                     },
                                 },
                             ))
@@ -379,6 +381,9 @@ fn handle_receiving_packets(
                             packet_event::ArpPacketFailure { reason },
                         )),
                     };
+                    if let Err(i) = send_packet_res {
+                        eprintln!("Failed to send packet success metric due to: {}", i)
+                    }
                     continue;
                 }
 
@@ -419,8 +424,14 @@ fn handle_receiving_packets(
                         successful_sender.send(PacketSuccessMetric::Fail(FailedPacketParsed {
                             ip_version: ip_header_and_data.get_version(),
                             protocol: ip_header_and_data.get_protocol(),
-                            source_location: ip_header_and_data.get_source_ip(),
-                            destination_location: ip_header_and_data.get_destination_ip(),
+                            source_location: packet_event::APacketAddress {
+                                ip_address: ip_header_and_data.get_source(),
+                                port: 0,
+                            },
+                            destination_location: packet_event::APacketAddress {
+                                ip_address: ip_header_and_data.get_destination(),
+                                port: 0,
+                            },
                             reason_for_failure: format!(
                                 "Unknown protocol occurred: {}",
                                 protocol_number
@@ -437,8 +448,14 @@ fn handle_receiving_packets(
                         successful_sender.send(PacketSuccessMetric::Fail(FailedPacketParsed {
                             ip_version: ip_header_and_data.get_version(),
                             protocol: ip_header_and_data.get_protocol(),
-                            source_location: ip_header_and_data.get_source_ip(),
-                            destination_location: ip_header_and_data.get_destination_ip(),
+                            source_location: packet_event::APacketAddress {
+                                ip_address: ip_header_and_data.get_source(),
+                                port: 0,
+                            },
+                            destination_location: packet_event::APacketAddress {
+                                ip_address: ip_header_and_data.get_destination(),
+                                port: 0,
+                            },
                             reason_for_failure: reason,
                         }))
                     {
@@ -455,8 +472,14 @@ fn handle_receiving_packets(
                                 FailedPacketParsed {
                                     ip_version: ip_header_and_data.get_version(),
                                     protocol: ip_header_and_data.get_protocol(),
-                                    source_location: ip_header_and_data.get_source_ip(),
-                                    destination_location: ip_header_and_data.get_destination_ip(),
+                                    source_location: packet_event::APacketAddress {
+                                        ip_address: ip_header_and_data.get_source(),
+                                        port: 0,
+                                    },
+                                    destination_location: packet_event::APacketAddress {
+                                        ip_address: ip_header_and_data.get_destination(),
+                                        port: 0,
+                                    },
                                     reason_for_failure: format!(
                                         "Unable to create tcp object due to {}",
                                         reason
@@ -501,16 +524,14 @@ fn handle_receiving_packets(
                         SuccessfulPacketParsed {
                             ip_version: ip_header_and_data.get_version(),
                             protocol: ip_header_and_data.get_protocol(),
-                            source_location: format!(
-                                "{}:{}",
-                                ip_header_and_data.get_source_ip(),
-                                tcp_object.source_port
-                            ),
-                            destination_location: format!(
-                                "{}:{}",
-                                ip_header_and_data.get_destination_ip(),
-                                tcp_object.destination_port
-                            ),
+                            source_location: packet_event::APacketAddress {
+                                ip_address: ip_header_and_data.get_source(),
+                                port: tcp_object.source_port,
+                            },
+                            destination_location: packet_event::APacketAddress {
+                                ip_address: ip_header_and_data.get_destination(),
+                                port: tcp_object.destination_port,
+                            },
                             content_size: tcp_object.content.len(),
                             tcp_flag: tcp_object.flag,
                             tcp_ttl: ip_header_and_data.get_ttl(),
@@ -526,8 +547,14 @@ fn handle_receiving_packets(
                                 FailedPacketParsed {
                                     ip_version: ip_header_and_data.get_version(),
                                     protocol: ip_header_and_data.get_protocol(),
-                                    source_location: ip_header_and_data.get_source_ip(),
-                                    destination_location: ip_header_and_data.get_destination_ip(),
+                                    source_location: packet_event::APacketAddress {
+                                        ip_address: ip_header_and_data.get_source(),
+                                        port: 0,
+                                    },
+                                    destination_location: packet_event::APacketAddress {
+                                        ip_address: ip_header_and_data.get_destination(),
+                                        port: 0,
+                                    },
                                     reason_for_failure: format!(
                                         "Unable to create udp object due to {}",
                                         reason
@@ -580,16 +607,14 @@ fn handle_receiving_packets(
                         SuccessfulPacketParsed {
                             ip_version: ip_header_and_data.get_version(),
                             protocol: ip_header_and_data.get_protocol(),
-                            source_location: format!(
-                                "{}:{}",
-                                ip_header_and_data.get_source_ip(),
-                                udp_object.source_port
-                            ),
-                            destination_location: format!(
-                                "{}:{}",
-                                ip_header_and_data.get_destination_ip(),
-                                udp_object.destination_port
-                            ),
+                            source_location: packet_event::APacketAddress {
+                                ip_address: ip_header_and_data.get_source(),
+                                port: udp_object.source_port,
+                            },
+                            destination_location: packet_event::APacketAddress {
+                                ip_address: ip_header_and_data.get_destination(),
+                                port: udp_object.destination_port,
+                            },
                             content_size: udp_object.content.len(),
 
                             tcp_flag: String::new(),
@@ -603,8 +628,14 @@ fn handle_receiving_packets(
                         successful_sender.send(PacketSuccessMetric::Fail(FailedPacketParsed {
                             ip_version: ip_header_and_data.get_version(),
                             protocol: ip_header_and_data.get_protocol(),
-                            source_location: ip_header_and_data.get_source_ip(),
-                            destination_location: ip_header_and_data.get_destination_ip(),
+                            source_location: packet_event::APacketAddress {
+                                ip_address: ip_header_and_data.get_source(),
+                                port: 0,
+                            },
+                            destination_location: packet_event::APacketAddress {
+                                ip_address: ip_header_and_data.get_destination(),
+                                port: 0,
+                            },
                             reason_for_failure: format!(
                                 "Unhandled protocol occurred: {}",
                                 ip_header_and_data.get_protocol()

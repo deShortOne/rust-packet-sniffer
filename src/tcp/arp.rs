@@ -5,20 +5,20 @@ use crate::locator::{
     mac_address::MacAddress,
 };
 
-pub struct ArpObject<'a> {
+pub struct ArpObject {
     pub _hardware_type: u16,
     pub _protocol_type: u16,
     pub _hardware_size: u8,
     pub _protocol_size: u8,
     pub op_code: ArpOperation,
-    pub sender_mac_address: MacAddress<'a>,
-    pub sender_ip_address: IpAddressVariant<'a>,
-    pub target_mac_address: MacAddress<'a>,
-    pub target_ip_address: IpAddressVariant<'a>,
+    pub sender_mac_address: MacAddress,
+    pub sender_ip_address: IpAddressVariant,
+    pub target_mac_address: MacAddress,
+    pub target_ip_address: IpAddressVariant,
 }
 
-impl<'a> ArpObject<'a> {
-    pub fn new(arp_payload: &'a [u8]) -> Result<Self, String> {
+impl ArpObject {
+    pub fn new(arp_payload: &[u8]) -> Result<Self, String> {
         let hardware_type = (arp_payload[0] as u16) << 8 | arp_payload[1] as u16;
         let protocol_type = (arp_payload[2] as u16) << 8 | arp_payload[3] as u16;
         let hardware_size = arp_payload[4];
@@ -65,7 +65,7 @@ pub enum ArpOperation {
     Reply,
 }
 
-impl<'a> fmt::Display for ArpOperation {
+impl fmt::Display for ArpOperation {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match *self {
             ArpOperation::Request => write!(f, "Request"),

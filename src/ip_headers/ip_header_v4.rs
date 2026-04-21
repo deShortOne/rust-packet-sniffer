@@ -1,5 +1,5 @@
 use crate::ip_headers::ip_header::IpObject;
-use crate::locator::custom_ip_address::{IpAddress, IpV4Address};
+use crate::locator::custom_ip_address::{IpAddress, IpAddressVariant, IpV4Address};
 use crate::transport_layer_protocol::TransportLayerProtocol;
 
 pub struct IpV4Header<'a> {
@@ -12,8 +12,8 @@ pub struct IpV4Header<'a> {
     pub ttl: u8,
     pub protocol: TransportLayerProtocol,
     pub ip_header_checksum: u16,
-    pub source_ip: IpV4Address<'a>,
-    pub destination_ip: IpV4Address<'a>,
+    pub source_ip: IpV4Address,
+    pub destination_ip: IpV4Address,
     pub _options: &'a [u8],
     pub data: &'a [u8],
 
@@ -116,12 +116,20 @@ impl<'a> IpObject for IpV4Header<'a> {
         self.version
     }
 
+    fn get_source(&self) -> IpAddressVariant {
+        IpAddressVariant::V4(self.source_ip.clone())
+    }
+
     fn get_source_ip(&self) -> String {
         self.source_ip.to_string()
     }
 
     fn get_source_ip_raw(&self) -> &[u8] {
         self.source_ip.get_raw_bytes()
+    }
+
+    fn get_destination(&self) -> IpAddressVariant {
+        IpAddressVariant::V4(self.destination_ip.clone())
     }
 
     fn get_destination_ip(&self) -> String {

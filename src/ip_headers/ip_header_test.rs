@@ -1,4 +1,5 @@
 use crate::ip_headers::ip_header::IpObject;
+use crate::locator::custom_ip_address::{IpAddress, IpAddressVariant, IpV4Address};
 use crate::transport_layer_protocol::TransportLayerProtocol;
 
 pub struct _IpHeaderTestObject {
@@ -16,6 +17,10 @@ impl IpObject for _IpHeaderTestObject {
         &[0; 0]
     }
 
+    fn get_destination(&self) -> IpAddressVariant {
+        IpAddressVariant::V4(IpV4Address::new(&[0; 0]))
+    }
+
     fn get_destination_ip(&self) -> String {
         String::new()
     }
@@ -30,6 +35,10 @@ impl IpObject for _IpHeaderTestObject {
 
     fn get_segment_length(&self) -> usize {
         0
+    }
+
+    fn get_source(&self) -> IpAddressVariant {
+        IpAddressVariant::V4(IpV4Address::new(&[0; 0]))
     }
 
     fn get_source_ip(&self) -> String {

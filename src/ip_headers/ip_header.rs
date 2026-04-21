@@ -1,6 +1,7 @@
 use crate::TransportLayerProtocol;
 use crate::ip_headers::ip_header_v4::IpV4Header;
 use crate::ip_headers::ip_header_v6::IpV6Header;
+use crate::locator::custom_ip_address::IpAddressVariant;
 
 pub enum IpVersions<'a> {
     V4(IpV4Header<'a>),
@@ -38,6 +39,12 @@ impl<'a> IpObject for IpVersions<'a> {
             IpVersions::V6(i) => i.get_version(),
         }
     }
+    fn get_source(&self) -> IpAddressVariant {
+        match self {
+            IpVersions::V4(i) => i.get_source(),
+            IpVersions::V6(i) => i.get_source(),
+        }
+    }
     fn get_source_ip(&self) -> String {
         match self {
             IpVersions::V4(i) => i.get_source_ip(),
@@ -48,6 +55,12 @@ impl<'a> IpObject for IpVersions<'a> {
         match self {
             IpVersions::V4(i) => i.get_source_ip_raw(),
             IpVersions::V6(i) => i.get_source_ip_raw(),
+        }
+    }
+    fn get_destination(&self) -> IpAddressVariant {
+        match self {
+            IpVersions::V4(i) => i.get_destination(),
+            IpVersions::V6(i) => i.get_destination(),
         }
     }
     fn get_destination_ip(&self) -> String {
@@ -76,8 +89,10 @@ pub trait IpObject {
     fn is_valid(&self) -> Result<(), String>;
     fn get_protocol(&self) -> TransportLayerProtocol;
     fn get_version(&self) -> u32;
+    fn get_source(&self) -> IpAddressVariant;
     fn get_source_ip(&self) -> String;
     fn get_source_ip_raw(&self) -> &[u8];
+    fn get_destination(&self) -> IpAddressVariant;
     fn get_destination_ip(&self) -> String;
     fn get_destination_ip_raw(&self) -> &[u8];
     fn get_ttl(&self) -> u8;
