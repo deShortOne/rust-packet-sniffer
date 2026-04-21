@@ -47,5 +47,9 @@ TryFrom would be more correct as it should error if the protocol number is unkno
 
 # Address Resolution Protocol
 There's a specific ARP just for Apple??
-ARP = ICMP??
+ARP is not icmp need to find correct protocol number for it
 ARP can be used for attacks when a malicious actor could simply respond to a request with their own IP address even if they aren't the intended target
+
+# Filtering maybe to do?
+Should really be checked and printed out after it's been sent via the channel rather than before so that concerns about specific ports, ip addresses etc. are handled as part of metrics collection rather than the code that is responsible for collecting and parsing packets
+Tho early exits are more efficient...
