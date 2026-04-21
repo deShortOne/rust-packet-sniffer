@@ -1,5 +1,5 @@
-use crate::custom_ip_address::{IpAddress, IpV6Address};
 use crate::ip_headers::ip_header::IpObject;
+use crate::locator::custom_ip_address::{IpAddress, IpV6Address};
 use crate::transport_layer_protocol::TransportLayerProtocol;
 
 pub struct IpV6Header<'a> {

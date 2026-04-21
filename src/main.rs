@@ -2,9 +2,9 @@ extern crate pnet;
 
 mod checksum_status;
 mod cli;
-mod custom_ip_address;
 mod helper;
 mod ip_headers;
+mod locator;
 mod packet_event;
 mod tcp;
 mod transport_layer_protocol;
@@ -25,8 +25,10 @@ use crate::ip_headers::ip_header::{IpObject, IpVersions};
 use crate::ip_headers::ip_header_v4::IpV4Header;
 use crate::ip_headers::ip_header_v6::IpV6Header;
 use crate::packet_event::{
-    FailedPacketParsed, NotHandledPacket, PacketSuccessMetric, SuccessfulPacketParsed,
+    ArpPacketSuccess, FailedPacketParsed, NotHandledPacket, PacketSuccessMetric,
+    SuccessfulPacketParsed,
 };
+use crate::tcp::arp::ArpOperation;
 use crate::transport_layer_protocol::TransportLayerProtocol;
 
 fn main() {
@@ -76,6 +78,11 @@ fn handle_summary(receiver: Receiver<PacketSuccessMetric>) {
     let mut reasons_for_failure_count: HashMap<String, usize> = HashMap::new();
     let mut dropped_packet_ethertypes: HashMap<String, usize> = HashMap::new();
 
+    let mut number_of_successful_arp_packets: usize = 0;
+    let mut ip_address_to_mac_address: HashMap<String, String> = HashMap::new();
+    let mut number_of_failed_arp_packets: usize = 0;
+    let mut reasons_for_arp_failure: HashMap<String, usize> = HashMap::new();
+
     let seperator = "========================================";
 
     let mut last_print = Instant::now();
@@ -84,6 +91,24 @@ fn handle_summary(receiver: Receiver<PacketSuccessMetric>) {
         // Try receiving with timeout so we can check time periodically
         match receiver.recv_timeout(Duration::from_millis(100)) {
             Ok(metric) => match metric {
+                PacketSuccessMetric::ArpSuccess(a) => {
+                    number_of_successful_arp_packets += 1;
+                    ip_address_to_mac_address
+                        .entry(a.sender_address.ip_address)
+                        .or_insert(a.sender_address.mac_address);
+                    if a.operation == ArpOperation::Reply.to_string() {
+                        ip_address_to_mac_address
+                            .entry(a.target_address.ip_address)
+                            .or_insert(a.target_address.mac_address);
+                    }
+                }
+                PacketSuccessMetric::ArpFailure(r) => {
+                    number_of_failed_arp_packets += 1;
+                    reasons_for_arp_failure
+                        .entry(r.reason)
+                        .and_modify(|count| *count += 1)
+                        .or_insert(1);
+                }
                 PacketSuccessMetric::Success(v) => {
                     total_number_of_successful_packets += 1;
 
@@ -241,6 +266,19 @@ fn handle_summary(receiver: Receiver<PacketSuccessMetric>) {
                 );
             }
 
+            println!(
+                "Received {} arp packets out of a total of {}",
+                number_of_successful_arp_packets,
+                number_of_successful_arp_packets + number_of_failed_arp_packets
+            );
+            // Could look to output ip address to mac addresses
+            if reasons_for_arp_failure.len() != 0 {
+                print_biggest_value_for_key(
+                    &reasons_for_arp_failure,
+                    "is the biggest reason for arp failure with count",
+                );
+            }
+
             println!("{0}\n{0}\n{0}", seperator);
             last_print = Instant::now();
         }
@@ -295,6 +333,28 @@ fn handle_receiving_packets(
                 };
 
                 let payload = packet.payload();
+                if packet.get_ethertype() == EtherTypes::Arp {
+                    let _ = match tcp::map_arp(payload) {
+                        Ok(i) => successful_sender.send(PacketSuccessMetric::ArpSuccess(
+                            ArpPacketSuccess {
+                                operation: i.op_code.to_string(),
+                                sender_address: packet_event::ArpPacketAddress {
+                                    mac_address: i.sender_mac_address.to_string(),
+                                    ip_address: i.sender_ip_address.to_string(),
+                                },
+                                target_address: packet_event::ArpPacketAddress {
+                                    mac_address: i.target_mac_address.to_string(),
+                                    ip_address: i.target_ip_address.to_string(),
+                                },
+                            },
+                        )),
+                        Err(reason) => successful_sender.send(PacketSuccessMetric::ArpFailure(
+                            packet_event::ArpPacketFailure { reason },
+                        )),
+                    };
+                    continue;
+                }
+
                 let ip_header_and_data: IpVersions;
                 if packet.get_ethertype() == EtherTypes::Ipv4 {
                     let ip_header_and_data_internal = match IpV4Header::new(payload) {

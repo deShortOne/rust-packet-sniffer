@@ -17,7 +17,7 @@ Get the interface name (should look like "docker0")
 ip address
 ```
 
-Run the app, passing in interface name (requires running with sudo0)
+Run the app, passing in interface name (requires running with sudo)
 ```bash
 cargo run -- --interface docker0
 ```
@@ -44,3 +44,8 @@ So the tcp checksum in Wireshark is not the final checksum but the partial check
 ## TransportLayerProtocol
 Messed around with using TryFrom instead of Try and removing Unknown but would make it harder to send information about that because ip header wouldn't have been constructed so ip etc. would need to be returned alongside the error.
 TryFrom would be more correct as it should error if the protocol number is unknown.
+
+# Address Resolution Protocol
+There's a specific ARP just for Apple??
+ARP = ICMP??
+ARP can be used for attacks when a malicious actor could simply respond to a request with their own IP address even if they aren't the intended target

@@ -1,7 +1,9 @@
 use crate::ip_headers::ip_header::IpVersions;
+use crate::tcp::arp::ArpObject;
 use crate::tcp::tcp::TcpObject;
 use crate::tcp::udp::UdpObject;
 
+pub mod arp;
 pub mod fake;
 mod tcp;
 mod udp;
@@ -9,6 +11,10 @@ mod udp;
 pub trait PacketBodyObject {
     fn get_source_port(&self) -> u16;
     fn get_destination_port(&self) -> u16;
+}
+
+pub fn map_arp<'a>(data: &'a [u8]) -> Result<ArpObject<'a>, String> {
+    ArpObject::new(data)
 }
 
 pub fn map_tcp<'a>(ip_header: &'a IpVersions) -> Result<TcpObject<'a>, String> {

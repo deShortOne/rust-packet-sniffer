@@ -1,9 +1,30 @@
 use crate::transport_layer_protocol::TransportLayerProtocol;
 
 pub enum PacketSuccessMetric {
+    ArpSuccess(ArpPacketSuccess),
+    ArpFailure(ArpPacketFailure),
+    NotHandled(NotHandledPacket),
     Success(SuccessfulPacketParsed),
     Fail(FailedPacketParsed),
-    NotHandled(NotHandledPacket),
+}
+
+pub struct ArpPacketSuccess {
+    pub operation: String,
+    pub sender_address: ArpPacketAddress,
+    pub target_address: ArpPacketAddress,
+}
+
+pub struct ArpPacketAddress {
+    pub mac_address: String,
+    pub ip_address: String,
+}
+
+pub struct ArpPacketFailure {
+    pub reason: String,
+}
+
+pub struct NotHandledPacket {
+    pub not_handled_ethertype: String,
 }
 
 pub struct SuccessfulPacketParsed {
@@ -24,8 +45,4 @@ pub struct FailedPacketParsed {
     pub destination_location: String,
 
     pub reason_for_failure: String,
-}
-
-pub struct NotHandledPacket {
-    pub not_handled_ethertype: String,
 }

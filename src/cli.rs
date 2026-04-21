@@ -53,9 +53,10 @@ impl TcpObjectValidation {
         let mut protocols_to_accept: Vec<TransportLayerProtocol> = Vec::new();
         if let Some(protocols) = args.protocol {
             for protocol in protocols {
-                match protocol.as_str() {
+                match protocol.to_uppercase().as_str() {
                     "TCP" => protocols_to_accept.push(TransportLayerProtocol::TCP),
                     "UDP" => protocols_to_accept.push(TransportLayerProtocol::UDP),
+                    "ARP" => protocols_to_accept.push(TransportLayerProtocol::ARP),
                     _ => {}
                 };
             }

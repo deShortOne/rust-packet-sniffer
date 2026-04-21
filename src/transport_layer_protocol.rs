@@ -4,12 +4,14 @@ use std::fmt;
 pub enum TransportLayerProtocol {
     TCP,
     UDP,
+    ARP,
     Unknown(u8),
 }
 
 impl From<TransportLayerProtocol> for u8 {
     fn from(value: TransportLayerProtocol) -> Self {
         match value {
+            TransportLayerProtocol::ARP => 1, // ICMP??
             TransportLayerProtocol::TCP => 6,
             TransportLayerProtocol::UDP => 17,
             TransportLayerProtocol::Unknown(i) => i,
@@ -20,6 +22,7 @@ impl From<TransportLayerProtocol> for u8 {
 impl fmt::Display for TransportLayerProtocol {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match *self {
+            TransportLayerProtocol::ARP => write!(f, "ARP"), // ICMP??
             TransportLayerProtocol::TCP => write!(f, "TCP"),
             TransportLayerProtocol::UDP => write!(f, "UDP"),
             TransportLayerProtocol::Unknown(i) => write!(f, "UNKNOWN protocol: {}", i),
