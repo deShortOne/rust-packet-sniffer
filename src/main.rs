@@ -335,19 +335,46 @@ fn handle_receiving_packets(
                 let payload = packet.payload();
                 if packet.get_ethertype() == EtherTypes::Arp {
                     let _ = match tcp::map_arp(payload) {
-                        Ok(i) => successful_sender.send(PacketSuccessMetric::ArpSuccess(
-                            ArpPacketSuccess {
-                                operation: i.op_code.to_string(),
-                                sender_address: packet_event::ArpPacketAddress {
-                                    mac_address: i.sender_mac_address.to_string(),
-                                    ip_address: i.sender_ip_address.to_string(),
+                        Ok(i) => {
+                            if i.op_code == ArpOperation::Request {
+                                println!(
+                                    "Arp request: {} ({}) is asking for {}",
+                                    i.sender_ip_address.to_string(),
+                                    i.sender_mac_address.to_string(),
+                                    i.target_ip_address.to_string()
+                                );
+                            } else if i.op_code == ArpOperation::Reply {
+                                println!(
+                                    "Arp reply: {} ({}) is replying {} ({})",
+                                    i.sender_ip_address.to_string(),
+                                    i.sender_mac_address.to_string(),
+                                    i.target_ip_address.to_string(),
+                                    i.target_mac_address.to_string()
+                                );
+                            } else {
+                                println!(
+                                    "!!! Arp Unhandled: {} ({}) to {} ({})",
+                                    i.sender_ip_address.to_string(),
+                                    i.sender_mac_address.to_string(),
+                                    i.target_ip_address.to_string(),
+                                    i.target_mac_address.to_string()
+                                );
+                            }
+
+                            successful_sender.send(PacketSuccessMetric::ArpSuccess(
+                                ArpPacketSuccess {
+                                    operation: i.op_code.to_string(),
+                                    sender_address: packet_event::ArpPacketAddress {
+                                        mac_address: i.sender_mac_address.to_string(),
+                                        ip_address: i.sender_ip_address.to_string(),
+                                    },
+                                    target_address: packet_event::ArpPacketAddress {
+                                        mac_address: i.target_mac_address.to_string(),
+                                        ip_address: i.target_ip_address.to_string(),
+                                    },
                                 },
-                                target_address: packet_event::ArpPacketAddress {
-                                    mac_address: i.target_mac_address.to_string(),
-                                    ip_address: i.target_ip_address.to_string(),
-                                },
-                            },
-                        )),
+                            ))
+                        }
                         Err(reason) => successful_sender.send(PacketSuccessMetric::ArpFailure(
                             packet_event::ArpPacketFailure { reason },
                         )),

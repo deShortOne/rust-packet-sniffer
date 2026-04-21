@@ -59,6 +59,7 @@ impl<'a> ArpObject<'a> {
     }
 }
 
+#[derive(PartialEq)]
 pub enum ArpOperation {
     Request,
     Reply,
