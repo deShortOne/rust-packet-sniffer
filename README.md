@@ -53,3 +53,8 @@ ARP can be used for attacks when a malicious actor could simply respond to a req
 # Filtering maybe to do?
 Should really be checked and printed out after it's been sent via the channel rather than before so that concerns about specific ports, ip addresses etc. are handled as part of metrics collection rather than the code that is responsible for collecting and parsing packets
 Tho early exits are more efficient...
+
+# Shutting down nicely
+`handle_summary` is absolutely fine, there may be a delay of 100ms but that's alright.
+`handle_receiving_packets` is not as `rx.next()` is a blocking action and so if no packet ever comes through, then this will block forever and not actually shutdown.
+To fix this, can use `rx.try_next()` instead which, if it doesn't receive a packet, it will return `None` allowing for checks to see if it's still running. Downside is using too many cpu cycles, as it continuously loops rather than blocks, which can be mitigated by having thread::sleep but this runs the risk of missing packets.

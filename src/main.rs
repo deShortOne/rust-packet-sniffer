@@ -15,6 +15,8 @@ use pnet::packet::Packet;
 use pnet::packet::ethernet::{EtherTypes, EthernetPacket};
 
 use std::collections::HashMap;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -42,25 +44,42 @@ fn main() {
         }
     };
 
+    let running = Arc::new(AtomicBool::new(true));
+    let r = running.clone();
+    ctrlc::set_handler(move || {
+        println!("Received Ctrl+C, shutting down...");
+        r.store(false, Ordering::SeqCst);
+    })
+    .expect("Error setting Ctrl-C handler");
+
     let (tx, rx) = mpsc::channel::<PacketSuccessMetric>();
+    let running1 = running.clone();
     let producer = thread::spawn(move || {
-        handle_receiving_packets(&validation_object.interface, &validation_object, tx);
+        handle_receiving_packets(
+            &validation_object.interface,
+            &validation_object,
+            tx,
+            running1,
+        );
     });
+    let running2 = running.clone();
     let consumer = thread::spawn(move || {
-        handle_summary(rx);
+        handle_summary(rx, running2);
     });
 
     match producer.join() {
-        Ok(i) => println!("consumer joined successfully: {:?}", i),
+        Ok(_) => println!("producer joined successfully"),
         Err(i) => eprintln!("Producer joined fail: {:?}", i),
     };
     match consumer.join() {
-        Ok(i) => println!("consumer joined successfully: {:?}", i),
+        Ok(_) => println!("consumer joined successfully"),
         Err(i) => eprintln!("consumer joined fail: {:?}", i),
     };
+
+    println!("Clean exit");
 }
 
-fn handle_summary(receiver: Receiver<PacketSuccessMetric>) {
+fn handle_summary(receiver: Receiver<PacketSuccessMetric>, running: Arc<AtomicBool>) {
     let mut total_number_of_successful_packets: usize = 0;
     let mut total_number_of_failed_packets: usize = 0;
     let mut total_number_of_dropped_packets: usize = 0;
@@ -90,6 +109,10 @@ fn handle_summary(receiver: Receiver<PacketSuccessMetric>) {
     let mut last_print = Instant::now();
 
     loop {
+        if !running.load(Ordering::SeqCst) {
+            break;
+        }
+
         // Try receiving with timeout so we can check time periodically
         match receiver.recv_timeout(Duration::from_millis(100)) {
             Ok(metric) => match metric {
@@ -285,6 +308,8 @@ fn handle_summary(receiver: Receiver<PacketSuccessMetric>) {
             last_print = Instant::now();
         }
     }
+
+    println!("Summary handling is now shut down");
 }
 
 fn print_biggest_value_for_key(dict_to_check: &HashMap<String, usize>, custom_middle_text: &str) {
@@ -303,6 +328,7 @@ fn handle_receiving_packets(
     interface_name: &str,
     validation_object: &TcpObjectValidation,
     successful_sender: Sender<PacketSuccessMetric>,
+    running: Arc<AtomicBool>,
 ) {
     let interface_names_match = |iface: &NetworkInterface| iface.name == interface_name;
 
@@ -324,8 +350,16 @@ fn handle_receiving_packets(
     };
 
     loop {
+        if !running.load(Ordering::SeqCst) {
+            break;
+        }
+
         match rx.next() {
             Ok(packet) => {
+                if !running.load(Ordering::SeqCst) {
+                    break;
+                }
+
                 let packet = match EthernetPacket::new(packet) {
                     Some(i) => i,
                     None => {
@@ -652,4 +686,6 @@ fn handle_receiving_packets(
             }
         }
     }
+
+    println!("Handle receiving packets is now shut down");
 }
