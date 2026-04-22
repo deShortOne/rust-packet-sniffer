@@ -15,6 +15,9 @@ use pnet::packet::Packet;
 use pnet::packet::ethernet::{EtherTypes, EthernetPacket};
 
 use std::collections::HashMap;
+use std::fmt::Display;
+use std::fs::File;
+use std::io::Write;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender};
@@ -309,7 +312,73 @@ fn handle_summary(receiver: Receiver<PacketSuccessMetric>, running: Arc<AtomicBo
         }
     }
 
+    let file_result = File::create("summary.txt");
+    if let Err(err) = file_result {
+        eprintln!("Failed to open summary.txt file to write because {}", err);
+    } else {
+        let mut file = file_result.unwrap();
+        file.write(b"total number of successful packets: ").unwrap();
+        file.write(&total_number_of_successful_packets.to_string().as_bytes())
+            .unwrap();
+        file.write(b"\ntotal number of failed packets: ").unwrap();
+        file.write(total_number_of_failed_packets.to_string().as_bytes())
+            .unwrap();
+
+        file.write(
+            format!(
+                "\nthere were {} unique successful protocol[s]\n",
+                protocol_counts.len()
+            )
+            .as_bytes(),
+        )
+        .unwrap();
+        process_map(&mut file, &protocol_counts);
+
+        file.write(
+            format!(
+                "there were {} unique unsuccessful protocol[s]\n",
+                failed_protocol_counts.len()
+            )
+            .as_bytes(),
+        )
+        .unwrap();
+        process_map(&mut file, &failed_protocol_counts);
+
+        file.write(format!("total bytes captured is {}\n", total_bytes_captured).as_bytes())
+            .unwrap();
+
+        file.write(
+            format!(
+                "there were {} reason[s] why there were failures\n",
+                reasons_for_failure_count.len()
+            )
+            .as_bytes(),
+        )
+        .unwrap();
+        process_map(&mut file, &reasons_for_failure_count);
+
+        file.write(
+            format!(
+                "mapped {} ip address[es] to mac address[es]\n",
+                ip_address_to_mac_address.len()
+            )
+            .as_bytes(),
+        )
+        .unwrap();
+        for (key, value) in &ip_address_to_mac_address {
+            file.write(format!("\t{} is mapped to {}\n", key, value).as_bytes())
+                .unwrap();
+        }
+    }
+
     println!("Summary handling is now shut down");
+}
+
+fn process_map<K: Display, V: Display>(file: &mut File, map: &HashMap<K, V>) {
+    for (key, value) in map {
+        file.write(format!("\t{} occurred {} times\n", key, value).as_bytes())
+            .unwrap();
+    }
 }
 
 fn print_biggest_value_for_key(dict_to_check: &HashMap<String, usize>, custom_middle_text: &str) {
